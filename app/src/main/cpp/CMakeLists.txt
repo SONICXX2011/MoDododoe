@@ -4,18 +4,20 @@ project(mymod CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ✅ ۴ سطح بالا: cpp → main → src → app → ROOT
+set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
+
+message(STATUS "ROOT_DIR = ${ROOT_DIR}")
+
 # ═══ ShadowHook ═══
 add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shadowhook/shadowhook/src/main/cpp
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp
     ${CMAKE_BINARY_DIR}/shadowhook
-)
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shadowhook/shadowhook/src/main/cpp/include
 )
 
 # ═══ BNM ═══
 add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../BNM
+    ${ROOT_DIR}/BNM
     ${CMAKE_BINARY_DIR}/BNM
 )
 get_property(BNM_INC TARGET BNM PROPERTY BNM_INCLUDE_DIRECTORIES)
@@ -23,12 +25,12 @@ include_directories(${BNM_INC})
 
 # ═══ KittyMemory ═══
 add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../kittymemory/KittyMemory
+    ${ROOT_DIR}/kittymemory/KittyMemory
     ${CMAKE_BINARY_DIR}/kittymemory
 )
 
 # ═══ ImGui ═══
-set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../imgui)
+set(IMGUI_DIR ${ROOT_DIR}/imgui)
 add_library(imgui STATIC
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -42,8 +44,26 @@ target_include_directories(imgui PUBLIC
     ${IMGUI_DIR}/backends
 )
 
-# ═══ ماژول اصلی ═══
+# ═══ Main module ═══
 add_library(mymod SHARED main.cpp)
+
+target_include_directories(mymod PRIVATE
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/include
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/arch/arm64
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/common
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/xdl
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/bsd
+    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/lss
+    ${ROOT_DIR}/BNM/include
+    ${ROOT_DIR}/BNM/external/include
+    ${ROOT_DIR}/BNM/external
+    ${ROOT_DIR}/BNM/external/utf8
+    ${ROOT_DIR}/BNM/src/private
+    ${ROOT_DIR}/kittymemory/KittyMemory
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
 
 target_link_libraries(mymod
     BNM
