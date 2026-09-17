@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(mymod CXX)
+project(mymod C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,17 +33,14 @@ set(SH_COMMON_SRC
     shadowhook/third_party/xdl/xdl_util.c
 )
 
-# ═══════════════════════════════════════════
-# ShadowHook — سورس مخصوص هر معماری
-# ═══════════════════════════════════════════
-if(ANDROID_ABI STREQUAL "arm64-v8a")
+if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
     set(SH_ARCH_SRC
         shadowhook/arch/arm64/sh_a64.c
         shadowhook/arch/arm64/sh_glue.S
         shadowhook/arch/arm64/sh_inst.c
     )
     set(SH_ARCH_INC shadowhook/arch/arm64)
-elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+elseif("${ANDROID_ABI}" STREQUAL "armeabi-v7a")
     set(SH_ARCH_SRC
         shadowhook/arch/arm/sh_a32.c
         shadowhook/arch/arm/sh_glue.S
@@ -57,9 +54,6 @@ else()
     message(FATAL_ERROR "معماری پشتیبانی نمیشه: ${ANDROID_ABI}")
 endif()
 
-# ═══════════════════════════════════════════
-# ShadowHook Library
-# ═══════════════════════════════════════════
 add_library(shadowhook STATIC
     ${SH_COMMON_SRC}
     ${SH_ARCH_SRC}
@@ -75,11 +69,7 @@ target_include_directories(shadowhook PUBLIC
     shadowhook/third_party/lss
 )
 
-target_compile_options(shadowhook PRIVATE
-    -O2
-    -fvisibility=hidden
-    -fno-stack-protector
-)
+target_compile_options(shadowhook PRIVATE -O2 -fvisibility=hidden -fno-stack-protector)
 
 # ═══════════════════════════════════════════
 # BNM
@@ -129,9 +119,6 @@ set(IG_SRC
     imgui/backends/imgui_impl_opengl3.cpp
 )
 
-# ═══════════════════════════════════════════
-# کتابخانه اصلی
-# ═══════════════════════════════════════════
 add_library(mymod SHARED
     main.cpp
     ${BNM_SRC}
@@ -151,12 +138,7 @@ target_include_directories(mymod PRIVATE
     shadowhook/include
 )
 
-target_compile_options(mymod PRIVATE
-    -fexceptions
-    -frtti
-    -O2
-    -fvisibility=hidden
-)
+target_compile_options(mymod PRIVATE -fexceptions -frtti -O2 -fvisibility=hidden)
 
 set_source_files_properties(${BNM_SRC} PROPERTIES
     COMPILE_OPTIONS "-include;cmath"
