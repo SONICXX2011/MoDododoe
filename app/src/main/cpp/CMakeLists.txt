@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ═══════════════════════════════════════════
-# ShadowHook
+# ShadowHook — به صورت کتابخانه جدا
 # ═══════════════════════════════════════════
-set(SH_SRC
+add_library(shadowhook STATIC
     shadowhook/shadowhook.c
     shadowhook/sh_elf.c
     shadowhook/sh_enter.c
@@ -34,6 +34,22 @@ set(SH_SRC
     shadowhook/third_party/xdl/xdl_linker.c
     shadowhook/third_party/xdl/xdl_lzma.c
     shadowhook/third_party/xdl/xdl_util.c
+)
+
+target_include_directories(shadowhook PUBLIC
+    shadowhook
+    shadowhook/include
+    shadowhook/arch/arm64
+    shadowhook/common
+    shadowhook/third_party/xdl
+    shadowhook/third_party/bsd
+    shadowhook/third_party/lss
+)
+
+target_compile_options(shadowhook PRIVATE
+    -O2
+    -fvisibility=hidden
+    -fno-stack-protector
 )
 
 # ═══════════════════════════════════════════
@@ -85,41 +101,27 @@ set(IG_SRC
 )
 
 # ═══════════════════════════════════════════
-# کتابخانه اصلی (یه .so واحد)
+# کتابخانه اصلی
 # ═══════════════════════════════════════════
 add_library(mymod SHARED
     main.cpp
-    ${SH_SRC}
     ${BNM_SRC}
     ${KM_SRC}
     ${IG_SRC}
 )
 
 target_include_directories(mymod PRIVATE
-    # ShadowHook
-    shadowhook
-    shadowhook/include
-    shadowhook/arch/arm64
-    shadowhook/common
-    shadowhook/third_party/xdl
-    shadowhook/third_party/bsd
-    shadowhook/third_party/lss
-    # BNM
     BNM/include
     BNM/external/include
     BNM/external
     BNM/external/utf8
     BNM/src/private
-    # KittyMemory
     kittymemory
-    # ImGui
     imgui
     imgui/backends
+    shadowhook/include     # ← برای اینکه GlobalSettings.hpp بتونه shadowhook.h رو ببینه
 )
 
-# ═══════════════════════════════════════════
-# کامپایل آپشن‌ها
-# ═══════════════════════════════════════════
 target_compile_options(mymod PRIVATE
     -fexceptions
     -frtti
@@ -127,15 +129,15 @@ target_compile_options(mymod PRIVATE
     -fvisibility=hidden
 )
 
-# BNM به cmath نیاز داره (باگ BNM)
 set_source_files_properties(${BNM_SRC} PROPERTIES
     COMPILE_OPTIONS "-include;cmath"
 )
 
 # ═══════════════════════════════════════════
-# لینک کتابخانه‌های سیستمی
+# لینک همه چیز با هم
 # ═══════════════════════════════════════════
 target_link_libraries(mymod
+    shadowhook              # ← این خط کلیدیه!
     log
     android
     EGL
