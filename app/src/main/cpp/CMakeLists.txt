@@ -4,74 +4,110 @@ project(mymod CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ✅ ۴ سطح بالا: cpp → main → src → app → ROOT
-set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
-
-message(STATUS "ROOT_DIR = ${ROOT_DIR}")
+# همه مسیرها از داخل cpp/ (چون کتابخونه‌ها اینجان)
 
 # ═══ ShadowHook ═══
-add_subdirectory(
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp
-    ${CMAKE_BINARY_DIR}/shadowhook
+set(SH_SRC
+    shadowhook/shadowhook.c
+    shadowhook/sh_elf.c
+    shadowhook/sh_enter.c
+    shadowhook/sh_hub.c
+    shadowhook/sh_island.c
+    shadowhook/sh_jni.c
+    shadowhook/sh_linker.c
+    shadowhook/sh_recorder.c
+    shadowhook/sh_safe.c
+    shadowhook/sh_switch.c
+    shadowhook/sh_task.c
+    shadowhook/sh_xdl.c
+    shadowhook/arch/arm64/sh_a64.c
+    shadowhook/arch/arm64/sh_glue.S
+    shadowhook/arch/arm64/sh_inst.c
+    shadowhook/common/bytesig.c
+    shadowhook/common/sh_errno.c
+    shadowhook/common/sh_log.c
+    shadowhook/common/sh_ref.c
+    shadowhook/common/sh_trampo.c
+    shadowhook/common/sh_util.c
+    shadowhook/third_party/xdl/xdl.c
+    shadowhook/third_party/xdl/xdl_iterate.c
+    shadowhook/third_party/xdl/xdl_linker.c
+    shadowhook/third_party/xdl/xdl_lzma.c
+    shadowhook/third_party/xdl/xdl_util.c
 )
 
 # ═══ BNM ═══
-add_subdirectory(
-    ${ROOT_DIR}/BNM
-    ${CMAKE_BINARY_DIR}/BNM
+set(BNM_SRC
+    BNM/src/Class.cpp
+    BNM/src/ClassesManagement.cpp
+    BNM/src/Coroutine.cpp
+    BNM/src/Defaults.cpp
+    BNM/src/Delegates.cpp
+    BNM/src/EventBase.cpp
+    BNM/src/Exceptions.cpp
+    BNM/src/FieldBase.cpp
+    BNM/src/Hooks.cpp
+    BNM/src/Image.cpp
+    BNM/src/Internals.cpp
+    BNM/src/Loading.cpp
+    BNM/src/MethodBase.cpp
+    BNM/src/MonoStructures.cpp
+    BNM/src/PropertyBase.cpp
+    BNM/src/UnityStructures.cpp
+    BNM/src/Utils.cpp
 )
-get_property(BNM_INC TARGET BNM PROPERTY BNM_INCLUDE_DIRECTORIES)
-include_directories(${BNM_INC})
 
-# ═══ KittyMemory ═══
-add_subdirectory(
-    ${ROOT_DIR}/kittymemory/KittyMemory
-    ${CMAKE_BINARY_DIR}/kittymemory
+# ═══ KittyMemory (بدون KittyAsm که Keystone می‌خواد) ═══
+set(KM_SRC
+    kittymemory/KittyMemory.cpp
+    kittymemory/KittyUtils.cpp
+    kittymemory/KittyScanner.cpp
+    kittymemory/KittyPtrValidator.cpp
+    kittymemory/KittyIOFile.cpp
+    kittymemory/MemoryBackup.cpp
+    kittymemory/MemoryPatch.cpp
 )
 
 # ═══ ImGui ═══
-set(IMGUI_DIR ${ROOT_DIR}/imgui)
-add_library(imgui STATIC
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_android.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
-)
-target_include_directories(imgui PUBLIC
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
+set(IG_SRC
+    imgui/imgui.cpp
+    imgui/imgui_draw.cpp
+    imgui/imgui_widgets.cpp
+    imgui/imgui_tables.cpp
+    imgui/backends/imgui_impl_android.cpp
+    imgui/backends/imgui_impl_opengl3.cpp
 )
 
-# ═══ Main module ═══
-add_library(mymod SHARED main.cpp)
+# ═══ یه .so واحد ═══
+add_library(mymod SHARED
+    main.cpp
+    ${SH_SRC}
+    ${BNM_SRC}
+    ${KM_SRC}
+    ${IG_SRC}
+)
 
 target_include_directories(mymod PRIVATE
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/include
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/arch/arm64
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/common
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/xdl
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/bsd
-    ${ROOT_DIR}/shadowhook/shadowhook/src/main/cpp/third_party/lss
-    ${ROOT_DIR}/BNM/include
-    ${ROOT_DIR}/BNM/external/include
-    ${ROOT_DIR}/BNM/external
-    ${ROOT_DIR}/BNM/external/utf8
-    ${ROOT_DIR}/BNM/src/private
-    ${ROOT_DIR}/kittymemory/KittyMemory
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
+    # ShadowHook
+    shadowhook
+    shadowhook/include
+    shadowhook/arch/arm64
+    shadowhook/common
+    shadowhook/third_party/xdl
+    shadowhook/third_party/bsd
+    shadowhook/third_party/lss
+    # BNM
+    BNM/include
+    BNM/external/include
+    BNM/external/utf8
+    BNM/src/private
+    # KittyMemory
+    kittymemory
+    # ImGui
+    imgui
+    imgui/backends
 )
 
-target_link_libraries(mymod
-    BNM
-    shadowhook
-    KittyMemory
-    imgui
-    log
-    android
-    EGL
-    GLESv3
-)
+target_compile_options(mymod PRIVATE -fexceptions -frtti)
+
+target_link_libraries(mymod log android EGL GLESv3)
