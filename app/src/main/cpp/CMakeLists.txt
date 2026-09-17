@@ -4,8 +4,6 @@ project(mymod CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# همه مسیرها از داخل cpp/ (چون کتابخونه‌ها اینجان)
-
 # ═══ ShadowHook ═══
 set(SH_SRC
     shadowhook/shadowhook.c
@@ -57,7 +55,7 @@ set(BNM_SRC
     BNM/src/Utils.cpp
 )
 
-# ═══ KittyMemory (بدون KittyAsm که Keystone می‌خواد) ═══
+# ═══ KittyMemory ═══
 set(KM_SRC
     kittymemory/KittyMemory.cpp
     kittymemory/KittyUtils.cpp
@@ -99,6 +97,7 @@ target_include_directories(mymod PRIVATE
     # BNM
     BNM/include
     BNM/external/include
+    BNM/external
     BNM/external/utf8
     BNM/src/private
     # KittyMemory
@@ -108,6 +107,16 @@ target_include_directories(mymod PRIVATE
     imgui/backends
 )
 
+# ✅ BNM از ShadowHook استفاده کنه
+target_compile_definitions(mymod PRIVATE
+    BNM_USE_SHADOWHOOK=1
+)
+
 target_compile_options(mymod PRIVATE -fexceptions -frtti)
+
+# ✅ BNM به cmath نیاز داره (باگ BNM)
+set_source_files_properties(${BNM_SRC} PROPERTIES
+    COMPILE_OPTIONS "-include;cmath"
+)
 
 target_link_libraries(mymod log android EGL GLESv3)
