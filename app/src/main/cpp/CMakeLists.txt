@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ═══════════════════════════════════════════
-# ShadowHook — به صورت کتابخانه جدا
+# ShadowHook — سورس‌های مشترک
 # ═══════════════════════════════════════════
-add_library(shadowhook STATIC
+set(SH_COMMON_SRC
     shadowhook/shadowhook.c
     shadowhook/sh_elf.c
     shadowhook/sh_enter.c
@@ -20,9 +20,6 @@ add_library(shadowhook STATIC
     shadowhook/sh_switch.c
     shadowhook/sh_task.c
     shadowhook/sh_xdl.c
-    shadowhook/arch/arm64/sh_a64.c
-    shadowhook/arch/arm64/sh_glue.S
-    shadowhook/arch/arm64/sh_inst.c
     shadowhook/common/bytesig.c
     shadowhook/common/sh_errno.c
     shadowhook/common/sh_log.c
@@ -36,10 +33,42 @@ add_library(shadowhook STATIC
     shadowhook/third_party/xdl/xdl_util.c
 )
 
+# ═══════════════════════════════════════════
+# ShadowHook — سورس مخصوص هر معماری
+# ═══════════════════════════════════════════
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(SH_ARCH_SRC
+        shadowhook/arch/arm64/sh_a64.c
+        shadowhook/arch/arm64/sh_glue.S
+        shadowhook/arch/arm64/sh_inst.c
+    )
+    set(SH_ARCH_INC shadowhook/arch/arm64)
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(SH_ARCH_SRC
+        shadowhook/arch/arm/sh_a32.c
+        shadowhook/arch/arm/sh_glue.S
+        shadowhook/arch/arm/sh_inst.c
+        shadowhook/arch/arm/sh_t16.c
+        shadowhook/arch/arm/sh_t32.c
+        shadowhook/arch/arm/sh_txx.c
+    )
+    set(SH_ARCH_INC shadowhook/arch/arm)
+else()
+    message(FATAL_ERROR "معماری پشتیبانی نمیشه: ${ANDROID_ABI}")
+endif()
+
+# ═══════════════════════════════════════════
+# ShadowHook Library
+# ═══════════════════════════════════════════
+add_library(shadowhook STATIC
+    ${SH_COMMON_SRC}
+    ${SH_ARCH_SRC}
+)
+
 target_include_directories(shadowhook PUBLIC
     shadowhook
     shadowhook/include
-    shadowhook/arch/arm64
+    ${SH_ARCH_INC}
     shadowhook/common
     shadowhook/third_party/xdl
     shadowhook/third_party/bsd
@@ -119,7 +148,7 @@ target_include_directories(mymod PRIVATE
     kittymemory
     imgui
     imgui/backends
-    shadowhook/include     # ← برای اینکه GlobalSettings.hpp بتونه shadowhook.h رو ببینه
+    shadowhook/include
 )
 
 target_compile_options(mymod PRIVATE
@@ -133,11 +162,8 @@ set_source_files_properties(${BNM_SRC} PROPERTIES
     COMPILE_OPTIONS "-include;cmath"
 )
 
-# ═══════════════════════════════════════════
-# لینک همه چیز با هم
-# ═══════════════════════════════════════════
 target_link_libraries(mymod
-    shadowhook              # ← این خط کلیدیه!
+    shadowhook
     log
     android
     EGL
