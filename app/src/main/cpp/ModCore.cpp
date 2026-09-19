@@ -79,7 +79,6 @@ typedef void (*OnClientErrorFn)(void* self, int transportError, void* message);
 static OnClientErrorFn orig_OnClientError = nullptr;
 
 static void Hook_OnClientError(void* self, int transportError, void* message) {
-    // message یک System.String* هست
     std::string msg = "";
     if (message) {
         try {
@@ -88,7 +87,7 @@ static void Hook_OnClientError(void* self, int transportError, void* message) {
         } catch (...) {}
     }
 
-    L("★★★ OnClientError: code=%d msg=%s", transportError, msg.c_str());
+    L("★★★ OnClientError code=%d msg=%s", transportError, msg.c_str());
 
     if (orig_OnClientError) {
         orig_OnClientError(self, transportError, message);
@@ -104,9 +103,8 @@ static void InstallOnClientErrorHook() {
     }
 
     try {
-        auto m = cls_CustomNetworkManager.GetMethod(
-            "OnClientError",
-            {"Mirror.TransportError", "System.String"});
+        // پیدا کردن OnClientError با 2 پارامتر
+        auto m = cls_CustomNetworkManager.GetMethod("OnClientError", 2);
 
         if (!m.IsValid()) {
             L("Hook: OnClientError not found");
@@ -140,15 +138,10 @@ static void InstallOnClientErrorHook() {
 }
 
 // ═══════════════════════════════════════════════════════
-// Log transport info
-// ═══════════════════════════════════════════════════════
 static void LogTransportInfo(void* mgr) {
     try {
         auto trField = cls_NetworkManager.GetField("transport");
-        if (!trField.IsValid()) {
-            L("transport field invalid");
-            return;
-        }
+        if (!trField.IsValid()) return;
 
         auto* tr = trField
             .cast<BNM::IL2CPP::Il2CppObject*>()
@@ -158,27 +151,19 @@ static void LogTransportInfo(void* mgr) {
         L("transport=%p", (void*) tr);
 
         if (!tr) {
-            L("⚠ transport is NULL!");
+            L("⚠ transport NULL");
             return;
         }
 
-        // اسم کلاس transport
-        try {
-            auto* klass = tr->klass;
-            if (klass && klass->name) {
-                L("transport class=%s", klass->name);
-            }
-        } catch (...) {}
-
-    } catch (const std::exception& e) {
-        L("LogTransport ex: %s", e.what());
-    } catch (...) {
-        L("LogTransport unknown ex");
-    }
+        auto* klass = tr->klass;
+        if (klass && klass->name) {
+            L("transport class=%s", klass->name);
+        }
+    } catch (...) {}
 }
 
 // ═══════════════════════════════════════════════════════
-// DirectConnect
+// DirectConnect — فقط StartClient(Uri) با scheme kcp
 // ═══════════════════════════════════════════════════════
 static bool DirectConnect() {
     L("[DC] start");
@@ -198,10 +183,9 @@ static bool DirectConnect() {
     }
     L("[DC] singleton=%p", (void*)mgr);
 
-    // ─── Log transport ───
     LogTransportInfo(mgr);
 
-    // ─── Set networkAddress = "host:port" ───
+    // ─── networkAddress هم ست می‌کنیم (برای اطمینان) ───
     try {
         char fullAddr[128];
         snprintf(fullAddr, sizeof(fullAddr), "%s:%d", SERVER_IP, SERVER_PORT);
@@ -217,18 +201,40 @@ static bool DirectConnect() {
         L("[DC] set networkAddress ex");
     }
 
-    // ─── StartClient() بدون آرگومان ───
+    // ─── StartClient(Uri) با scheme kcp ───
     try {
-        auto m = cls_NetworkManager.GetMethod("StartClient", 0);
+        BNM::Class uriCls("System", "Uri", BNM::Image("System.dll"));
+        if (!uriCls.IsValid())
+            uriCls = BNM::Class("System", "Uri", BNM::Image("mscorlib.dll"));
+
+        if (!uriCls.IsValid()) {
+            L("[DC] Uri class missing");
+            return false;
+        }
+
+        char uri[64];
+        snprintf(uri, sizeof(uri), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
+
+        auto* uriObj = uriCls.CreateNewObjectParameters(
+            BNM::CreateMonoString(uri));
+        if (!uriObj) {
+            L("[DC] Uri alloc failed");
+            return false;
+        }
+        L("[DC] uri = %s | obj=%p", uri, (void*)uriObj);
+
+        auto m = cls_NetworkManager.GetMethod("StartClient", 1);
         if (m.IsValid()) {
-            m.cast<void>().Call(mgr);
-            L("[DC] StartClient() called");
+            m.cast<void>().Call(mgr, uriObj);
+            L("[DC] StartClient(Uri) CALLED");
             return true;
+        } else {
+            L("[DC] StartClient(Uri) method not found");
         }
     } catch (const std::exception& e) {
-        L("[DC] StartClient ex: %s", e.what());
+        L("[DC] StartClient(Uri) ex: %s", e.what());
     } catch (...) {
-        L("[DC] StartClient unknown ex");
+        L("[DC] StartClient(Uri) unknown ex");
     }
 
     L("[DC] FAIL");
@@ -308,7 +314,6 @@ void InstallGameHooks() {
       (int)cls_NetworkClient.IsValid(),
       (int)cls_CustomNetworkManager.IsValid());
 
-    // ─── Hook OnClientError ───
     InstallOnClientErrorHook();
 
     L("=== done ===");
@@ -326,10 +331,5 @@ void StopStateLoop() {
     L("StateLoop stopped");
 }
 
-void DumpStartClientInfo() {
-    L("(dump disabled)");
-}
-
-void DisableModButtons() {
-    L("(disable disabled)");
-}
+void DumpStartClientInfo() { L("(dump disabled)"); }
+void DisableModButtons()   { L("(disable disabled)"); }
