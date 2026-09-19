@@ -38,9 +38,6 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
-// ═══════════════════════════════════════════════════════
-// Cached classes
-// ═══════════════════════════════════════════════════════
 static BNM::Class cls_GtaMenu;
 static BNM::Class cls_Button;
 static BNM::Class cls_Selectable;
@@ -48,25 +45,19 @@ static BNM::Class cls_NetworkManager;
 static BNM::Class cls_NetworkClient;
 static BNM::Class cls_CustomNetworkManager;
 
-// ═══════════════════════════════════════════════════════
-// Buttons
-// ═══════════════════════════════════════════════════════
 struct BtnEntry {
     BNM::IL2CPP::Il2CppObject* obj;
     std::string name;
+    bool disabled;
 };
 
 static std::mutex                g_btnMtx;
 static std::vector<BtnEntry>     g_buttons;
 static std::unordered_set<void*> g_known;
-static std::unordered_set<void*> g_disabled;
 
 static std::atomic<bool> g_running{false};
 static std::thread       g_loopThread;
 
-// ═══════════════════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════════════════
 static std::string GetGameObjectName(BNM::IL2CPP::Il2CppObject* comp) {
     if (!comp) return "";
     try {
@@ -102,38 +93,6 @@ static bool NameMatches(const std::string& actual,
     return false;
 }
 
-// ═══════════════════════════════════════════════════════
-// Button.Awake Hook
-// ═══════════════════════════════════════════════════════
-typedef void (*AwakeFn)(BNM::IL2CPP::Il2CppObject*);
-static AwakeFn orig_Button_Awake = nullptr;
-
-static void Hook_Button_Awake(BNM::IL2CPP::Il2CppObject* self) {
-    if (orig_Button_Awake) orig_Button_Awake(self);
-    if (!self) return;
-
-    void* key = (void*)self;
-    {
-        std::lock_guard<std::mutex> lk(g_btnMtx);
-        if (g_known.count(key)) return;
-        g_known.insert(key);
-    }
-
-    std::string nm = GetGameObjectName(self);
-    if (nm.empty()) return;
-
-    {
-        std::lock_guard<std::mutex> lk(g_btnMtx);
-        g_buttons.push_back({ self, nm });
-    }
-
-    LOGI("Button.Awake: %s", nm.c_str());
-    JB_Log("Btn: " + nm);
-}
-
-// ═══════════════════════════════════════════════════════
-// GtaMenu
-// ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* GetGtaMenu() {
     if (!cls_GtaMenu.IsValid()) return nullptr;
     try {
@@ -163,200 +122,144 @@ static bool GetNetworkActive() {
 }
 
 // ═══════════════════════════════════════════════════════
-// Dump StartClient Info — دکمه جدید
+// جمع‌آوری دکمه‌ها از صحنه
 // ═══════════════════════════════════════════════════════
-void DumpStartClientInfo() {
-    L("═══════════════════════════════════════");
-    L("DUMP: NetworkManager info");
-    L("═══════════════════════════════════════");
+static void ScanButtons() {
+    if (!cls_Button.IsValid()) return;
 
-    // NetworkManager
-    if (cls_NetworkManager.IsValid()) {
-        L("[NM] valid=1");
-        
-        L("[NM] Methods:");
+    try {
+        // UnityEngine.Object.FindObjectsOfType(Button) — قدیمی
+        // UnityEngine.Object.FindObjectsByType(Button, FindObjectsSortMode.None) — جدید
+        BNM::Class clsUnityObject("UnityEngine", "Object",
+                                  BNM::Image("UnityEngine.CoreModule.dll"));
+        if (!clsUnityObject.IsValid()) return;
+
+        BNM::IL2CPP::Il2CppArray* arr = nullptr;
+
+        // تلاش اول: FindObjectsByType
         try {
-            auto methods = cls_NetworkManager.GetMethods();
-            for (auto& m : methods) {
-                try {
-                    L("  %s", m.str().c_str());
-                } catch (...) {
-                    L("  <method>");
-                }
+            auto m = clsUnityObject.GetMethod("FindObjectsByType", 2);
+            if (m.IsValid()) {
+                arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
+                       .Call(cls_Button.GetClass(), (int)0);
             }
-        } catch (...) {
-            L("  GetMethods failed");
-        }
-        
-        L("[NM] Fields:");
-        try {
-            auto fields = cls_NetworkManager.GetFields();
-            for (auto& f : fields) {
-                try {
-                    L("  %s", f.str().c_str());
-                } catch (...) {
-                    L("  <field>");
+        } catch (...) {}
+
+        // تلاش دوم: FindObjectsOfType
+        if (!arr) {
+            try {
+                auto m = clsUnityObject.GetMethod("FindObjectsOfType", 1);
+                if (m.IsValid()) {
+                    arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
+                           .Call(cls_Button.GetClass());
                 }
-            }
-        } catch (...) {
-            L("  GetFields failed");
+            } catch (...) {}
         }
-    } else {
-        L("[NM] valid=0");
+
+        if (!arr) return;
+
+        // پیمایش آرایه
+        auto* arrayClass = BNM::Class(arr).GetMethod("get_Length");
+        if (!arrayClass.IsValid()) return;
+        int len = arrayClass.cast<int>().Call(arr);
+        if (len <= 0) return;
+
+        auto* items = (BNM::IL2CPP::Il2CppObject**)
+            ((char*)arr + sizeof(BNM::IL2CPP::Il2CppObject) + sizeof(void*) + sizeof(void*));
+
+        std::lock_guard<std::mutex> lk(g_btnMtx);
+
+        for (int i = 0; i < len; i++) {
+            auto* btn = items[i];
+            if (!btn) continue;
+
+            void* key = (void*)btn;
+            if (g_known.count(key)) continue;
+            g_known.insert(key);
+
+            std::string nm = GetGameObjectName(btn);
+            if (nm.empty()) continue;
+
+            g_buttons.push_back({ btn, nm, false });
+            LOGI("Found Button: %s", nm.c_str());
+        }
+    } catch (...) {}
+}
+
+static void DisableButtonsFromList() {
+    std::lock_guard<std::mutex> lk(g_btnMtx);
+    for (auto& b : g_buttons) {
+        if (b.disabled) continue;
+        if (!NameMatches(b.name, {"LACEDITOR", "COMMUNITY", "DOCUMENT"})) continue;
+
+        bool ok = false;
+        if (cls_Selectable.IsValid()) {
+            try {
+                cls_Selectable.GetMethod("set_interactable", 1)
+                    .cast<void>()
+                    .Call(b.obj, false);
+                ok = true;
+            } catch (...) {}
+        }
+        if (!ok && cls_Button.IsValid()) {
+            try {
+                cls_Button.GetMethod("set_interactable", 1)
+                    .cast<void>()
+                    .Call(b.obj, false);
+                ok = true;
+            } catch (...) {}
+        }
+        if (ok) {
+            b.disabled = true;
+            L("DISABLED: %s", b.name.c_str());
+        }
     }
+}
 
-    L("═══════════════════════════════════════");
-    L("DUMP: CustomNetworkManager info");
-    L("═══════════════════════════════════════");
-
-    if (cls_CustomNetworkManager.IsValid()) {
-        L("[CNM] valid=1");
-        
-        L("[CNM] Methods:");
-        try {
-            auto methods = cls_CustomNetworkManager.GetMethods();
-            for (auto& m : methods) {
-                try {
-                    L("  %s", m.str().c_str());
-                } catch (...) {
-                    L("  <method>");
-                }
-            }
-        } catch (...) {
-            L("  GetMethods failed");
-        }
-        
-        L("[CNM] Fields:");
-        try {
-            auto fields = cls_CustomNetworkManager.GetFields();
-            for (auto& f : fields) {
-                try {
-                    L("  %s", f.str().c_str());
-                } catch (...) {
-                    L("  <field>");
-                }
-            }
-        } catch (...) {
-            L("  GetFields failed");
-        }
-    } else {
-        L("[CNM] valid=0");
-    }
-
-    L("═══════════════════════════════════════");
-    L("DUMP: NetworkClient info");
-    L("═══════════════════════════════════════");
-
-    if (cls_NetworkClient.IsValid()) {
-        L("[NC] valid=1");
-        
-        L("[NC] Methods:");
-        try {
-            auto methods = cls_NetworkClient.GetMethods();
-            for (auto& m : methods) {
-                try {
-                    L("  %s", m.str().c_str());
-                } catch (...) {
-                    L("  <method>");
-                }
-            }
-        } catch (...) {
-            L("  GetMethods failed");
-        }
-    } else {
-        L("[NC] valid=0");
-    }
-
-    L("═══════════════════════════════════════");
-    L("DUMP: GtaMenuControl info");
-    L("═══════════════════════════════════════");
-
-    if (cls_GtaMenu.IsValid()) {
-        L("[GTA] valid=1");
-        
-        L("[GTA] Methods:");
-        try {
-            auto methods = cls_GtaMenu.GetMethods();
-            for (auto& m : methods) {
-                try {
-                    L("  %s", m.str().c_str());
-                } catch (...) {
-                    L("  <method>");
-                }
-            }
-        } catch (...) {
-            L("  GetMethods failed");
-        }
-        
-        L("[GTA] Fields:");
-        try {
-            auto fields = cls_GtaMenu.GetFields();
-            for (auto& f : fields) {
-                try {
-                    L("  %s", f.str().c_str());
-                } catch (...) {
-                    L("  <field>");
-                }
-            }
-        } catch (...) {
-            L("  GetFields failed");
-        }
-    } else {
-        L("[GTA] valid=0");
-    }
-
-    L("═══════════════════════════════════════");
-    L("DUMP: DONE");
-    L("═══════════════════════════════════════");
+void DisableModButtons() {
+    L("--- DisableModButtons ---");
+    ScanButtons();
+    DisableButtonsFromList();
+    L("DisableModButtons done");
 }
 
 // ═══════════════════════════════════════════════════════
-// Disable Mod Buttons — دکمه جدید
+// Dump
 // ═══════════════════════════════════════════════════════
-void DisableModButtons() {
-    L("--- DisableModButtons ---");
+void DumpStartClientInfo() {
+    L("═══════════ DUMP START ═══════════");
 
-    std::lock_guard<std::mutex> lk(g_btnMtx);
-    int disabled = 0;
-
-    for (auto& b : g_buttons) {
-        if (NameMatches(b.name, {"LACEDITOR", "COMMUNITY", "DOCUMENT"})) {
-            void* key = (void*)b.obj;
-            if (g_disabled.count(key)) continue;
-
-            bool ok = false;
-
-            // روش ۱: Selectable.set_interactable
-            if (cls_Selectable.IsValid()) {
-                try {
-                    cls_Selectable.GetMethod("set_interactable", 1)
-                        .cast<void>()
-                        .Call(b.obj, false);
-                    ok = true;
-                } catch (...) {}
+    if (cls_NetworkManager.IsValid()) {
+        L("[NM] Methods:");
+        try {
+            for (auto& m : cls_NetworkManager.GetMethods()) {
+                try { L("  %s", m.str().c_str()); } catch (...) {}
             }
-
-            // روش ۲: Button.set_interactable
-            if (!ok && cls_Button.IsValid()) {
-                try {
-                    cls_Button.GetMethod("set_interactable", 1)
-                        .cast<void>()
-                        .Call(b.obj, false);
-                    ok = true;
-                } catch (...) {}
+        } catch (...) {}
+        L("[NM] Fields:");
+        try {
+            for (auto& f : cls_NetworkManager.GetFields()) {
+                try { L("  %s", f.str().c_str()); } catch (...) {}
             }
-
-            if (ok) {
-                g_disabled.insert(key);
-                disabled++;
-                L("DISABLED: %s", b.name.c_str());
-            } else {
-                L("FAIL disable: %s", b.name.c_str());
-            }
-        }
+        } catch (...) {}
     }
 
-    L("DisableModButtons done: %d buttons", disabled);
+    if (cls_CustomNetworkManager.IsValid()) {
+        L("[CNM] Methods:");
+        try {
+            for (auto& m : cls_CustomNetworkManager.GetMethods()) {
+                try { L("  %s", m.str().c_str()); } catch (...) {}
+            }
+        } catch (...) {}
+        L("[CNM] Fields:");
+        try {
+            for (auto& f : cls_CustomNetworkManager.GetFields()) {
+                try { L("  %s", f.str().c_str()); } catch (...) {}
+            }
+        } catch (...) {}
+    }
+
+    L("═══════════ DUMP END ═══════════");
 }
 
 // ═══════════════════════════════════════════════════════
@@ -365,138 +268,114 @@ void DisableModButtons() {
 static bool DirectConnect() {
     L("[DC] === START ===");
 
-    // ─── ۱. ساخت URI ───
     BNM::Class uriCls("System", "Uri", BNM::Image("System.dll"));
-    if (!uriCls.IsValid()) {
+    if (!uriCls.IsValid())
         uriCls = BNM::Class("System", "Uri", BNM::Image("mscorlib.dll"));
-    }
+
     if (!uriCls.IsValid()) {
-        L("[DC] FAIL: System.Uri not found");
+        L("[DC] FAIL: System.Uri missing");
         return false;
     }
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
+    char uri[64];
+    snprintf(uri, sizeof(uri), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
 
-    BNM::IL2CPP::Il2CppObject* uri = nullptr;
+    BNM::IL2CPP::Il2CppObject* uriObj = nullptr;
     try {
-        uri = uriCls.CreateNewObjectParameters(BNM::CreateMonoString(buf));
+        uriObj = uriCls.CreateNewObjectParameters(BNM::CreateMonoString(uri));
     } catch (...) {}
-    
-    if (!uri) {
+    if (!uriObj) {
         try {
-            uri = uriCls.CreateNewInstance();
-            if (uri) {
+            uriObj = uriCls.CreateNewInstance();
+            if (uriObj) {
                 uriCls.GetMethod(".ctor", 1)
                     .cast<void>()
-                    .Call(uri, BNM::CreateMonoString(buf));
+                    .Call(uriObj, BNM::CreateMonoString(uri));
             }
         } catch (...) {}
     }
 
-    if (!uri) {
-        L("[DC] FAIL: Uri creation failed");
+    if (!uriObj) {
+        L("[DC] FAIL: Uri alloc");
         return false;
     }
-    L("[DC] uri=%s -> %p", buf, (void*)uri);
+    L("[DC] uri=%s", uri);
 
-    // ─── ۲. CustomNetworkManager ───
+    // CustomNetworkManager
     if (cls_CustomNetworkManager.IsValid()) {
-        L("[DC] Trying CustomNetworkManager");
-        
         try {
             auto* mgr = cls_CustomNetworkManager.GetMethod("get_singleton", 0)
                             .cast<BNM::IL2CPP::Il2CppObject*>()
                             .Call();
-            
             if (mgr) {
                 L("[DC] CNM.singleton=%p", (void*)mgr);
-                
-                auto startClient = cls_CustomNetworkManager.GetMethod("StartClient", 1);
-                if (startClient.IsValid()) {
-                    startClient.cast<void>().Call(mgr, uri);
-                    L("[DC] CNM.StartClient(Uri) CALLED");
-                    return true;
-                }
+
+                // تلاش ۱: StartClient(Uri)
+                try {
+                    auto m = cls_CustomNetworkManager.GetMethod("StartClient", 1);
+                    if (m.IsValid()) {
+                        m.cast<void>().Call(mgr, uriObj);
+                        L("[DC] CNM.StartClient(Uri) OK");
+                        return true;
+                    }
+                } catch (...) {}
+
+                // تلاش ۲: ست کردن networkAddress بعد StartClient()
+                try {
+                    auto field = cls_NetworkManager.GetField("networkAddress");
+                    if (field.IsValid()) {
+                        field.cast<BNM::Structures::Mono::String*>()
+                             .Set(BNM::CreateMonoString(SERVER_IP));
+                        L("[DC] NM.networkAddress=%s", SERVER_IP);
+                    }
+                } catch (...) {}
+
+                try {
+                    auto m = cls_CustomNetworkManager.GetMethod("StartClient", 0);
+                    if (m.IsValid()) {
+                        m.cast<void>().Call(mgr);
+                        L("[DC] CNM.StartClient() OK");
+                        return true;
+                    }
+                } catch (...) {}
             }
-        } catch (const std::exception& e) {
-            L("[DC] CNM ex: %s", e.what());
-        } catch (...) {
-            L("[DC] CNM ex unknown");
-        }
+        } catch (...) {}
     }
 
-    // ─── ۳. NetworkManager ───
+    // NetworkManager
     if (cls_NetworkManager.IsValid()) {
-        L("[DC] Trying NetworkManager");
-        
         try {
             auto* mgr = cls_NetworkManager.GetMethod("get_singleton", 0)
                             .cast<BNM::IL2CPP::Il2CppObject*>()
                             .Call();
-            
             if (mgr) {
-                L("[DC] NM.singleton=%p", (void*)mgr);
-                
-                // StartClient(Uri)
-                auto startClient = cls_NetworkManager.GetMethod("StartClient", 1);
-                if (startClient.IsValid()) {
-                    startClient.cast<void>().Call(mgr, uri);
-                    L("[DC] NM.StartClient(Uri) CALLED");
-                    return true;
-                }
-                
-                // networkAddress + StartClient()
                 try {
-                    cls_NetworkManager.GetField("networkAddress")
-                        .cast<BNM::Structures::Mono::String*>()
-                        .Set(BNM::CreateMonoString(buf));
-                    L("[DC] networkAddress set");
-                    
-                    auto sc0 = cls_NetworkManager.GetMethod("StartClient", 0);
-                    if (sc0.IsValid()) {
-                        sc0.cast<void>().Call(mgr);
-                        L("[DC] NM.StartClient() CALLED");
+                    auto m = cls_NetworkManager.GetMethod("StartClient", 1);
+                    if (m.IsValid()) {
+                        m.cast<void>().Call(mgr, uriObj);
+                        L("[DC] NM.StartClient(Uri) OK");
                         return true;
                     }
-                } catch (const std::exception& e) {
-                    L("[DC] networkAddress fail: %s", e.what());
-                } catch (...) {
-                    L("[DC] networkAddress fail unknown");
-                }
+                } catch (...) {}
             }
-        } catch (const std::exception& e) {
-            L("[DC] NM ex: %s", e.what());
-        } catch (...) {
-            L("[DC] NM ex unknown");
-        }
+        } catch (...) {}
     }
 
-    L("[DC] FAIL: all methods failed");
+    L("[DC] FAIL");
     return false;
 }
 
-// ═══════════════════════════════════════════════════════
-// Trigger Start Game
 // ═══════════════════════════════════════════════════════
 void TriggerStartGame() {
     std::thread([]() {
         L("--- StartGame ---");
         g_state.networkSuppressed = true;
 
-        int tries = 0;
-        while (tries < 100) {
-            auto* gta = GetGtaMenu();
-            if (gta) {
-                L("[SG] GtaMenu found after %d tries", tries);
-                break;
-            }
+        for (int i = 0; i < 100 && !GetGtaMenu(); i++)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            tries++;
-        }
 
         if (!GetGtaMenu()) {
-            L("[SG] FAIL: GtaMenu never appeared");
+            L("[SG] FAIL: GtaMenu not ready");
             return;
         }
 
@@ -507,11 +386,10 @@ void TriggerStartGame() {
 }
 
 // ═══════════════════════════════════════════════════════
-// StateLoop
-// ═══════════════════════════════════════════════════════
 static void StateLoop() {
     using clock = std::chrono::steady_clock;
     auto last = clock::now();
+    auto lastBtn = clock::now();
 
     while (g_running) {
         auto now = clock::now();
@@ -529,63 +407,48 @@ static void StateLoop() {
             L("Menu -> %d", menu);
             g_state.lastMenu = menu;
         }
-
         if (network != g_state.lastNetworkActive) {
             g_state.lastNetworkActive = network;
             L("Net -> %s", network ? "ON" : "OFF");
         }
 
         JB_SetGameState(menu, network);
+
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - lastBtn).count() >= 700) {
+            lastBtn = now;
+            ScanButtons();
+            DisableButtonsFromList();
+        }
     }
 }
 
 // ═══════════════════════════════════════════════════════
-// Install hooks
-// ═══════════════════════════════════════════════════════
 void InstallGameHooks() {
     L("=== InstallGameHooks ===");
 
-    auto imgAssembly = BNM::Image("Assembly-CSharp.dll");
-    if (!imgAssembly.IsValid()) imgAssembly = BNM::Image("Assembly-CSharp");
+    auto imgAsm    = BNM::Image("Assembly-CSharp.dll");
+    if (!imgAsm.IsValid()) imgAsm = BNM::Image("Assembly-CSharp");
 
-    auto imgUI = BNM::Image("UnityEngine.UI.dll");
+    auto imgUI     = BNM::Image("UnityEngine.UI.dll");
     if (!imgUI.IsValid()) imgUI = BNM::Image("UnityEngine.UI");
 
     auto imgMirror = BNM::Image("Mirror.dll");
     if (!imgMirror.IsValid()) imgMirror = BNM::Image("Mirror");
 
-    cls_GtaMenu        = BNM::Class("", "GtaMenuControl", imgAssembly);
-    cls_Button         = BNM::Class("UnityEngine.UI", "Button", imgUI);
-    cls_Selectable     = BNM::Class("UnityEngine.UI", "Selectable", imgUI);
-    cls_NetworkManager = BNM::Class("Mirror", "NetworkManager", imgMirror);
-    cls_NetworkClient  = BNM::Class("Mirror", "NetworkClient", imgMirror);
-    cls_CustomNetworkManager = BNM::Class("", "CustomNetworkManager", imgAssembly);
+    cls_GtaMenu              = BNM::Class("", "GtaMenuControl", imgAsm);
+    cls_Button               = BNM::Class("UnityEngine.UI", "Button", imgUI);
+    cls_Selectable           = BNM::Class("UnityEngine.UI", "Selectable", imgUI);
+    cls_NetworkManager       = BNM::Class("Mirror", "NetworkManager", imgMirror);
+    cls_NetworkClient        = BNM::Class("Mirror", "NetworkClient", imgMirror);
+    cls_CustomNetworkManager = BNM::Class("", "CustomNetworkManager", imgAsm);
 
-    L("GtaMenu=%d", (int)cls_GtaMenu.IsValid());
-    L("Button=%d", (int)cls_Button.IsValid());
-    L("Selectable=%d", (int)cls_Selectable.IsValid());
-    L("NetworkManager=%d", (int)cls_NetworkManager.IsValid());
-    L("NetworkClient=%d", (int)cls_NetworkClient.IsValid());
-    L("CustomNetworkManager=%d", (int)cls_CustomNetworkManager.IsValid());
-
-    if (cls_Button.IsValid()) {
-        auto awake = cls_Button.GetMethod("Awake", 0);
-        void* addr = (void*)awake.GetOffset();
-        L("Button.Awake addr=%p", addr);
-        
-        if (addr) {
-            void* stub = shadowhook_hook_func_addr(
-                addr,
-                (void*)Hook_Button_Awake,
-                (void**)&orig_Button_Awake);
-            
-            if (stub) {
-                L("Button.Awake hook OK");
-            } else {
-                L("Button.Awake hook FAIL err=%d", shadowhook_get_errno());
-            }
-        }
-    }
+    L("GtaMenu=%d Btn=%d NM=%d NC=%d CNM=%d",
+      (int)cls_GtaMenu.IsValid(),
+      (int)cls_Button.IsValid(),
+      (int)cls_NetworkManager.IsValid(),
+      (int)cls_NetworkClient.IsValid(),
+      (int)cls_CustomNetworkManager.IsValid());
 
     L("=== done ===");
 }

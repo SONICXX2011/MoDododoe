@@ -54,7 +54,7 @@ public class UnityGameUIBridge {
     }
 
     public void hide() {
-        Log.i(TAG, "hide() ignored");
+        Log.i(TAG, "hide() called");
     }
 
     public void setGameState(int menu, boolean networkActive) {
@@ -142,7 +142,6 @@ public class UnityGameUIBridge {
         mStatusText.setPadding(0, 0, 0, 20);
         panel.addView(mStatusText);
 
-        // ─── ردیف اول دکمه‌ها ───
         LinearLayout row1 = new LinearLayout(activity);
         row1.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -177,7 +176,7 @@ public class UnityGameUIBridge {
         dumpBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                log("--- Dump StartClient clicked ---");
+                log("--- Dump StartClient ---");
                 nativeDumpStartClient();
             }
         });
@@ -185,7 +184,6 @@ public class UnityGameUIBridge {
 
         panel.addView(row1);
 
-        // ─── ردیف دوم دکمه‌ها ───
         LinearLayout row2 = new LinearLayout(activity);
         row2.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -201,15 +199,31 @@ public class UnityGameUIBridge {
         disableBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                log("--- Disable Buttons clicked ---");
+                log("--- Disable Buttons ---");
                 nativeDisableButtons();
             }
         });
         row2.addView(disableBtn);
 
+        Button closeBtn = new Button(activity);
+        closeBtn.setText("Close");
+        closeBtn.setTextColor(Color.WHITE);
+        closeBtn.setTextSize(12);
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setColor(0xFFE53935);
+        cbg.setCornerRadius(12f);
+        closeBtn.setBackground(cbg);
+        closeBtn.setPadding(30, 20, 30, 20);
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                removeView();
+            }
+        });
+        row2.addView(closeBtn);
+
         panel.addView(row2);
 
-        // ─── کنسول لاگ ───
         ScrollView scroll = new ScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -233,6 +247,15 @@ public class UnityGameUIBridge {
         mRootView = container;
 
         Log.i(TAG, "Mod menu shown");
+    }
+
+    private void removeView() {
+        if (mRootView == null) return;
+        ViewGroup parent = (ViewGroup) mRootView.getParent();
+        if (parent != null) parent.removeView(mRootView);
+        mRootView = null;
+        mStatusText = null;
+        Log.i(TAG, "Mod menu hidden");
     }
 
     private void updateStatus(final String s) {
