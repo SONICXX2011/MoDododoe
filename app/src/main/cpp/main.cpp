@@ -51,6 +51,9 @@ void DetachThreadIfNeeded(bool needsDetach) {
     if (needsDetach && g_vm) g_vm->DetachCurrentThread();
 }
 
+// ═══════════════════════════════════════════════════════
+// BNM ready callback
+// ═══════════════════════════════════════════════════════
 static void OnBNMLoaded() {
     LOGI("=== BNM READY ===");
     JB_Log("=== BNM READY ===");
@@ -75,30 +78,34 @@ static void OnBNMLoaded() {
     StartStateLoop();
 }
 
+// ═══════════════════════════════════════════════════════
+// Fallback poll — فقط اگه AllowLateInitHook جواب نداد
+// (الان غیرفعاله، چون AllowLateInitHook کار می‌کنه)
+// ═══════════════════════════════════════════════════════
 static void PollLibil2cpp() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-    LOGI("Poll thread: waiting for libil2cpp.so");
-    JB_Log("Polling for libil2cpp.so...");
+    LOGI("Poll thread: checking libil2cpp.so");
+    JB_Log("Polling libil2cpp...");
 
-    for (int i = 0; i < 600; i++) {
-        void* handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
-        if (handle) {
-            LOGI("libil2cpp.so found after %d tries (%d ms)", i, i * 100);
-            JB_Log("libil2cpp found at try " + std::to_string(i));
-
-            bool ok = BNM::Loading::TryLoadByDlfcnHandle(handle);
-            LOGI("TryLoadByDlfcnHandle -> %s", ok ? "OK" : "FAIL");
-            JB_Log(std::string("TryLoadByDlfcnHandle: ") + (ok ? "OK" : "FAIL"));
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    void* handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
+    if (!handle) {
+        LOGI("libil2cpp.so not loaded, will rely on late hook");
+        JB_Log("libil2cpp not loaded");
+        return;
     }
 
-    LOGE("libil2cpp.so never appeared");
-    JB_Log("FAIL: libil2cpp never appeared");
+    LOGI("libil2cpp.so found, trying TryLoadByDlfcnHandle");
+    JB_Log("libil2cpp found");
+
+    bool ok = BNM::Loading::TryLoadByDlfcnHandle(handle);
+    LOGI("TryLoadByDlfcnHandle -> %s", ok ? "OK" : "FAIL");
+    JB_Log(std::string("TryLoadByDlfcnHandle: ") + (ok ? "OK" : "FAIL"));
 }
 
+// ═══════════════════════════════════════════════════════
+// JNI_OnLoad
+// ═══════════════════════════════════════════════════════
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     LOGI("JNI_OnLoad");
     g_vm = vm;
@@ -109,11 +116,22 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         return JNI_VERSION_1_6;
     }
 
+    // 1. ShadowHook
     int r = shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
     LOGI("shadowhook_init -> %d", r);
 
+    // 2. فعال‌سازی لود دیرهنگام (کلید حل مشکل!)
+    BNM::Loading::AllowLateInitHook();
+    LOGI("AllowLateInitHook called");
+
+    // 3. callbacks
     BNM::Loading::AddOnLoadedEvent(OnBNMLoaded);
 
+    // 4. تلاش اولیه
+    bool ok = BNM::Loading::TryLoadByJNI(env);
+    LOGI("TryLoadByJNI -> %s", ok ? "OK" : "deferred");
+
+    // 5. پولینگ به عنوان fallback
     std::thread(PollLibil2cpp).detach();
 
     return JNI_VERSION_1_6;
