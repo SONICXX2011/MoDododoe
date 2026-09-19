@@ -25,6 +25,9 @@ jclass       g_bridgeClass = nullptr;
 jobject      g_bridgeInstance = nullptr;
 RuntimeState g_state;
 
+// نگه‌داشتن handle کتابخانه il2cpp
+static void* g_il2cppHandle = nullptr;
+
 JNIEnv* GetEnv() {
     if (!g_vm) return nullptr;
     JNIEnv* env = nullptr;
@@ -52,7 +55,21 @@ void DetachThreadIfNeeded(bool needsDetach) {
 }
 
 // ═══════════════════════════════════════════════════════
-// BNM ready callback
+// Custom method finder — با dlsym مستقیم
+// ═══════════════════════════════════════════════════════
+static void* CustomMethodFinder(const char* name, void* userData) {
+    void* handle = userData;
+    if (!handle) return nullptr;
+
+    void* addr = dlsym(handle, name);
+    if (addr) {
+        LOGI("Finder: %s -> %p", name, addr);
+    }
+    return addr;
+}
+
+// ═══════════════════════════════════════════════════════
+// BNM loaded callback
 // ═══════════════════════════════════════════════════════
 static void OnBNMLoaded() {
     LOGI("=== BNM READY ===");
@@ -79,28 +96,52 @@ static void OnBNMLoaded() {
 }
 
 // ═══════════════════════════════════════════════════════
-// Fallback poll — فقط اگه AllowLateInitHook جواب نداد
-// (الان غیرفعاله، چون AllowLateInitHook کار می‌کنه)
+// Poll thread
 // ═══════════════════════════════════════════════════════
-static void PollLibil2cpp() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+static void PollAndLoad() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-    LOGI("Poll thread: checking libil2cpp.so");
+    LOGI("Poll: looking for libil2cpp.so");
     JB_Log("Polling libil2cpp...");
 
-    void* handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
-    if (!handle) {
-        LOGI("libil2cpp.so not loaded, will rely on late hook");
-        JB_Log("libil2cpp not loaded");
+    for (int i = 0; i < 100; i++) {
+        g_il2cppHandle = dlopen("libil2cpp.so", RTLD_NOLOAD);
+        if (g_il2cppHandle) {
+            LOGI("libil2cpp found at try %d", i);
+            JB_Log("libil2cpp found at try " + std::to_string(i));
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if (!g_il2cppHandle) {
+        LOGE("libil2cpp.so never found");
+        JB_Log("FAIL: libil2cpp not found");
         return;
     }
 
-    LOGI("libil2cpp.so found, trying TryLoadByDlfcnHandle");
-    JB_Log("libil2cpp found");
+    // روش ۱: با custom finder و TryLoadByUsersFinder
+    LOGI("Setting custom method finder");
+    JB_Log("Setting custom finder...");
 
-    bool ok = BNM::Loading::TryLoadByDlfcnHandle(handle);
-    LOGI("TryLoadByDlfcnHandle -> %s", ok ? "OK" : "FAIL");
-    JB_Log(std::string("TryLoadByDlfcnHandle: ") + (ok ? "OK" : "FAIL"));
+    BNM::Loading::SetMethodFinder(CustomMethodFinder, g_il2cppHandle);
+
+    LOGI("Calling TryLoadByUsersFinder");
+    JB_Log("TryLoadByUsersFinder...");
+
+    bool ok = BNM::Loading::TryLoadByUsersFinder();
+
+    LOGI("TryLoadByUsersFinder -> %s", ok ? "OK" : "FAIL");
+    JB_Log(std::string("TryLoadByUsersFinder: ") + (ok ? "OK" : "FAIL"));
+
+    if (!ok) {
+        LOGE("UsersFinder failed — trying fallback dlfcn handle");
+        JB_Log("Fallback TryLoadByDlfcnHandle...");
+
+        bool ok2 = BNM::Loading::TryLoadByDlfcnHandle(g_il2cppHandle);
+        LOGI("TryLoadByDlfcnHandle -> %s", ok2 ? "OK" : "FAIL");
+        JB_Log(std::string("TryLoadByDlfcnHandle: ") + (ok2 ? "OK" : "FAIL"));
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -116,23 +157,23 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         return JNI_VERSION_1_6;
     }
 
-    // 1. ShadowHook
+    // ShadowHook
     int r = shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
     LOGI("shadowhook_init -> %d", r);
 
-    // 2. فعال‌سازی لود دیرهنگام (کلید حل مشکل!)
+    // late init
     BNM::Loading::AllowLateInitHook();
     LOGI("AllowLateInitHook called");
 
-    // 3. callbacks
+    // callback
     BNM::Loading::AddOnLoadedEvent(OnBNMLoaded);
 
-    // 4. تلاش اولیه
+    // اولین تلاش (احتمالاً fail میشه چون il2cpp نیست)
     bool ok = BNM::Loading::TryLoadByJNI(env);
     LOGI("TryLoadByJNI -> %s", ok ? "OK" : "deferred");
 
-    // 5. پولینگ به عنوان fallback
-    std::thread(PollLibil2cpp).detach();
+    // Poll thread — با custom finder
+    std::thread(PollAndLoad).detach();
 
     return JNI_VERSION_1_6;
 }
