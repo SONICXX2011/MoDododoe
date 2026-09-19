@@ -12,10 +12,10 @@
 
 namespace GameApi {
 
-// فقط روی main thread صدا زده بشه!
 void Init();
 bool IsReady();
 
+// فقط آبجکت‌های زنده‌ی توی صحنه (بدون prefab)
 std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls);
 
 std::string GetName(BNM::IL2CPP::Il2CppObject* obj);
