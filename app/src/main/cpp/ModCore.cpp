@@ -188,10 +188,12 @@ static int GetCurrentMenu() {
     if (!ctrl) return -1;
 
     try {
-        return cls_GtaMenu
+        BNM::Field<int> f = cls_GtaMenu
             .GetField("currentMenu")
-            .cast<int>()
-            .Get(ctrl);
+            .cast<int>();
+
+        f[ctrl];
+        return f.Get();
     } catch (...) {
         return -1;
     }
@@ -361,11 +363,11 @@ void InstallGameHooks() {
         imgMirror = BNM::Image("Mirror");
     }
 
-    cls_GtaMenu = BNM::Class("", "GtaMenuControl", imgAssembly);
-    cls_Button = BNM::Class("UnityEngine.UI", "Button", imgUI);
-    cls_Selectable = BNM::Class("UnityEngine.UI", "Selectable", imgUI);
+    cls_GtaMenu        = BNM::Class("", "GtaMenuControl", imgAssembly);
+    cls_Button         = BNM::Class("UnityEngine.UI", "Button", imgUI);
+    cls_Selectable     = BNM::Class("UnityEngine.UI", "Selectable", imgUI);
     cls_NetworkManager = BNM::Class("Mirror", "NetworkManager", imgMirror);
-    cls_NetworkClient = BNM::Class("Mirror", "NetworkClient", imgMirror);
+    cls_NetworkClient  = BNM::Class("Mirror", "NetworkClient", imgMirror);
 
     LOGI("GtaMenuControl  valid=%d", (int) cls_GtaMenu.IsValid());
     LOGI("Button          valid=%d", (int) cls_Button.IsValid());

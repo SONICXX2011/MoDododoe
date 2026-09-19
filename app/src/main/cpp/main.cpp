@@ -73,10 +73,16 @@ static void OnBNMLoaded() {
     try {
         auto imgs = BNM::Image::GetImages();
         LOGI("Loaded images (%zu):", imgs.size());
+
         for (auto& img : imgs) {
-            LOGI("  %s", std::string(img.str()).c_str());
+            auto* info = img.GetInfo();
+            if (info && info->name) {
+                LOGI("  %s", info->name);
+            }
         }
-    } catch (...) {}
+    } catch (...) {
+        LOGE("Failed to enumerate images");
+    }
 
     InstallGameHooks();
     StartStateLoop();
@@ -95,7 +101,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         return JNI_VERSION_1_6;
     }
 
-    // 1. ShadowHook
+    // 1. ShadowHook init
     int r = shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
     LOGI("shadowhook_init -> %d", r);
 
