@@ -1,5 +1,7 @@
 #include "GameApi.h"
 
+#include "BNM/Exceptions.hpp"
+
 #include <android/log.h>
 #include <algorithm>
 #include <cctype>
@@ -45,7 +47,6 @@ std::vector<Il2CppObject*> GetAllInstances(BNM::Class cls) {
     if (!g_ready) { LOGI("[GameApi] not ready"); return result; }
     if (!cls.IsValid()) { LOGI("[GameApi] invalid class"); return result; }
 
-    // تبدیل Il2CppType* → System.Type از طریق API رسمی BNM
     auto* monoType = cls.GetMonoType();
     if (!monoType) { LOGI("[GameApi] GetMonoType null"); return result; }
 
@@ -56,7 +57,6 @@ std::vector<Il2CppObject*> GetAllInstances(BNM::Class cls) {
 
     ObjectArray* arr = nullptr;
 
-    // استفاده از TryInvoke رسمی BNM — نه SIGSEGV trap دستی
     auto ex = BNM::TryInvoke([&]() {
         if (twoArg) {
             arr = findObjects.cast<ObjectArray*>().Call(monoType, true);
@@ -73,7 +73,6 @@ std::vector<Il2CppObject*> GetAllInstances(BNM::Class cls) {
 
     if (!arr) { LOGI("[GameApi] array null"); return result; }
 
-    // Array::ToVector — API رسمی BNM
     auto objects = arr->ToVector();
     LOGI("[GameApi] Unity returned %zu objects", objects.size());
 
