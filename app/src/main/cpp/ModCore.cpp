@@ -148,7 +148,7 @@ static void DoGetAllObjects() {
 }
 
 // ═══════════════════════════════════════════════════════
-// UNITYACTION DELEGATE (با ctor واقعی)
+// UNITYACTION DELEGATE — با target غیر-null
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
     if (!method.IsValid()) {
@@ -156,7 +156,6 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
         return nullptr;
     }
 
-    // ─── UnityAction class ───
     auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
     if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
 
@@ -166,33 +165,18 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
         return nullptr;
     }
 
-    // ─── لاگ ctorها ───
-    auto methods = uaCls.GetMethods();
-    int ctors = 0;
-    for (auto& mm : methods) {
-        auto* info = mm.GetInfo();
-        if (!info || !info->name) continue;
-        if (std::string(info->name) != ".ctor") continue;
-        L("[DELEGATE] UnityAction.ctor params=%d", (int)info->parameters_count);
-        ctors++;
-        if (ctors > 5) break;
-    }
-
-    // ─── ctor(object, IntPtr) ───
     auto ctor = uaCls.GetMethod(".ctor", 2);
     if (!ctor.IsValid()) {
         L("[DELEGATE] .ctor(2) not found");
         return nullptr;
     }
 
-    // ─── instance ───
     auto* delegateObj = uaCls.CreateNewInstance();
     if (!delegateObj) {
         L("[DELEGATE] CreateNewInstance failed");
         return nullptr;
     }
 
-    // ─── fn pointer ───
     void* fnPtr = (void*)method.GetInfo()->methodPointer;
     if (!fnPtr) {
         L("[DELEGATE] fnPtr null for %s", method.str().c_str());
@@ -201,19 +185,19 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
 
     L("[DELEGATE] fnPtr=%p for %s", fnPtr, method.str().c_str());
 
-    // ─── ctor(null, fnPtr) ───
+    // ─── نکته مهم: target غیر-null پاس می‌دیم تا چک .NET رد بشه ───
     bool ok = false;
     auto ex = BNM::TryInvoke([&]() {
         ctor[delegateObj].cast<void>()(
-            (BNM::IL2CPP::Il2CppObject*)nullptr,
+            delegateObj,   // ← target = خود delegate
             fnPtr
         );
         ok = true;
     });
 
     if (ex.IsValid()) {
-        L("[DELEGATE] ctor ex: %s: %s",
-          ex.ClassName().c_str(), ex.Message().c_str());
+        L("[DELEGATE] ctor ex: %s",
+          ex.Message().c_str());
         return nullptr;
     }
 
@@ -245,12 +229,10 @@ static void InstallButtonListeners() {
 
     if (!cls_Button.IsValid()) { L("[LISTENERS] Button invalid"); return; }
 
-    // STAGE-1
     auto buttons = GameApi::GetAllInstances(cls_Button);
     L("[LISTENERS] STAGE-1: got %zu objects", buttons.size());
     if (buttons.empty()) { L("[LISTENERS] empty"); return; }
 
-    // STAGE-2: لاگ ID + Name
     size_t logLimit = buttons.size() < 15 ? buttons.size() : 15;
     for (size_t i = 0; i < logLimit; i++) {
         int id = GameApi::GetInstanceID(buttons[i]);
@@ -259,7 +241,6 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-2: done");
 
-    // STAGE-3
     auto handlerCls = BNM::Class("MyModMenu", "ClickHandlers");
     if (!handlerCls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
 
@@ -272,7 +253,6 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-3: methods ok");
 
-    // STAGE-4
     auto* charDel = CreateUnityAction(charMethod);
     auto* backDel = CreateUnityAction(backMethod);
     auto* exitDel = CreateUnityAction(exitMethod);
@@ -283,7 +263,6 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-4: delegates ok");
 
-    // STAGE-5: bind
     int bound = 0;
     for (size_t i = 0; i < buttons.size(); i++) {
         auto* btn = buttons[i];
@@ -493,7 +472,6 @@ void InstallGameHooks() {
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
-    // InstallButtonListeners(); ← توی Update hook اجرا می‌شه (main thread)
 
     L("=== done ===");
 }
