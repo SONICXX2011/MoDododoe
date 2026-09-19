@@ -3,6 +3,7 @@
 #include "JavaBridge.h"
 #include "Globals.h"
 
+#include "BNM/ClassesManagement.hpp"
 #include "BNM/Class.hpp"
 #include "BNM/Image.hpp"
 #include "BNM/Method.hpp"
@@ -41,7 +42,7 @@ static std::string ReadMonoString(BNM::Structures::Mono::String* s) {
 }
 
 // ═══════════════════════════════════════════════════════
-// CLICK HANDLERS (custom class)
+// CLICK HANDLERS
 // ═══════════════════════════════════════════════════════
 struct ClickHandlers : public BNM::IL2CPP::Il2CppObject {
     BNM_CustomClass(ClickHandlers,
