@@ -11,6 +11,7 @@
 #include "BNM/Utils.hpp"
 #include "BNM/BasicMonoStructures.hpp"
 #include "BNM/Delegates.hpp"
+#include "BNM/Exceptions.hpp"
 
 #include <android/log.h>
 #include <atomic>
@@ -150,29 +151,36 @@ static void DoGetAllObjects() {
 // UNITYACTION DELEGATE
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
-    try {
-        auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
-        if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
+    if (!method.IsValid()) {
+        L("[DELEGATE] method invalid");
+        return nullptr;
+    }
 
-        BNM::Class uaCls("UnityEngine.Events", "UnityAction", imgCore);
-        if (!uaCls.IsValid()) {
-            L("[DELEGATE] UnityAction not found");
-            return nullptr;
-        }
+    BNM::DelegateBase* result = nullptr;
 
-        auto* action = uaCls.CreateNewInstance();
-        if (!action) return nullptr;
+    auto ex = BNM::TryInvoke([&]() {
+        BNM::DelegateBase tmp;
+        result = tmp.Create(method);
+    });
 
-        auto* mc = (BNM::MulticastDelegateBase*)action;
-        auto* del = mc->Add(method);
-        if (!del) return nullptr;
+    if (ex.IsValid()) {
+        L("[DELEGATE] ex: %s: %s",
+          ex.ClassName().c_str(), ex.Message().c_str());
+        return nullptr;
+    }
 
-        return (BNM::IL2CPP::Il2CppObject*)action;
-    } catch (...) { return nullptr; }
+    if (!result) {
+        L("[DELEGATE] Create returned null");
+        return nullptr;
+    }
+
+    L("[DELEGATE] created %p for %s",
+      (void*)result, method.str().c_str());
+    return (BNM::IL2CPP::Il2CppObject*)result;
 }
 
 // ═══════════════════════════════════════════════════════
-// INSTALL BUTTON LISTENERS (با STAGE logging)
+// INSTALL BUTTON LISTENERS
 // ═══════════════════════════════════════════════════════
 static const std::vector<std::string> CHARACTER_NAMES = {
     "Character", "CHARACTER", "CharacterButton", "CharSelect", "CharSelectButton"
@@ -189,13 +197,12 @@ static void InstallButtonListeners() {
 
     if (!cls_Button.IsValid()) { L("[LISTENERS] Button invalid"); return; }
 
-    // ─── STAGE-1: فقط گرفتن آرایه ───
+    // STAGE-1: گرفتن آرایه
     auto buttons = GameApi::GetAllInstances(cls_Button);
     L("[LISTENERS] STAGE-1: got %zu objects", buttons.size());
-
     if (buttons.empty()) { L("[LISTENERS] empty"); return; }
 
-    // ─── STAGE-2: لاگ ID + Name ───
+    // STAGE-2: لاگ ID + Name
     size_t logLimit = buttons.size() < 15 ? buttons.size() : 15;
     for (size_t i = 0; i < logLimit; i++) {
         int id = GameApi::GetInstanceID(buttons[i]);
@@ -204,7 +211,7 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-2: done");
 
-    // ─── STAGE-3: چک ClickHandlers ───
+    // STAGE-3: چک ClickHandlers
     auto handlerCls = BNM::Class("MyModMenu", "ClickHandlers");
     if (!handlerCls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
 
@@ -217,17 +224,18 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-3: methods ok");
 
-    // ─── STAGE-4: ساخت delegateها ───
+    // STAGE-4: ساخت delegateها
     auto* charDel = CreateUnityAction(charMethod);
     auto* backDel = CreateUnityAction(backMethod);
     auto* exitDel = CreateUnityAction(exitMethod);
     if (!charDel || !backDel || !exitDel) {
-        L("[LISTENERS] delegate creation failed");
+        L("[LISTENERS] STAGE-4 failed: char=%p back=%p exit=%p",
+          (void*)charDel, (void*)backDel, (void*)exitDel);
         return;
     }
     L("[LISTENERS] STAGE-4: delegates ok");
 
-    // ─── STAGE-5: iterate و bind ───
+    // STAGE-5: iterate و bind
     int bound = 0;
     for (size_t i = 0; i < buttons.size(); i++) {
         auto* btn = buttons[i];
@@ -245,16 +253,30 @@ static void InstallButtonListeners() {
 
         L("[LISTENERS] STAGE-5: trying %s -> %s", name.c_str(), role);
 
-        auto* onClick = BNM::Class(btn)
-            .GetMethod("get_onClick", 0)
-            .cast<BNM::IL2CPP::Il2CppObject*>()
-            [btn]();
-        if (!onClick) { L("[LISTENERS] STAGE-5: %s onClick null", name.c_str()); continue; }
+        BNM::IL2CPP::Il2CppObject* onClick = nullptr;
+        auto ex1 = BNM::TryInvoke([&]() {
+            onClick = BNM::Class(btn)
+                .GetMethod("get_onClick", 0)
+                .cast<BNM::IL2CPP::Il2CppObject*>()
+                [btn]();
+        });
+        if (ex1.IsValid() || !onClick) {
+            L("[LISTENERS] STAGE-5: %s onClick failed", name.c_str());
+            continue;
+        }
 
-        BNM::Class(onClick)
-            .GetMethod("AddListener", 1)
-            .cast<void>()
-            [onClick](target);
+        bool addOk = false;
+        auto ex2 = BNM::TryInvoke([&]() {
+            BNM::Class(onClick)
+                .GetMethod("AddListener", 1)
+                .cast<void>()
+                [onClick](target);
+            addOk = true;
+        });
+        if (ex2.IsValid() || !addOk) {
+            L("[LISTENERS] STAGE-5: %s AddListener failed", name.c_str());
+            continue;
+        }
 
         L("[LISTENERS] STAGE-5: bound %s -> %s", name.c_str(), role);
         bound++;
@@ -310,7 +332,7 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     if (orig_Update) ((void(*)(void*,void*))orig_Update)(self, methodInfo);
     auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
 
-    // ─── Install listeners روی main thread (فقط یک بار) ───
+    // نصب listenerها روی main thread (یک بار)
     if (!g_listenersInstalled.load()) {
         g_listenersInstalled.store(true);
         L("[Update] installing listeners on main thread...");
@@ -424,7 +446,7 @@ void InstallGameHooks() {
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
-    // InstallButtonListeners(); ← میره توی Update hook (main thread)
+    // InstallButtonListeners(); ← توی Update hook اجرا می‌شه (main thread)
 
     L("=== done ===");
 }

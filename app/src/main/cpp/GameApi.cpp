@@ -22,17 +22,26 @@ void Init() {
 
     auto core = BNM::Image("UnityEngine.CoreModule.dll");
     if (!core.IsValid()) core = BNM::Image("UnityEngine.CoreModule");
-    if (!core.IsValid()) { LOGI("[GameApi] CoreModule invalid"); return; }
+    if (!core.IsValid()) {
+        LOGI("[GameApi] CoreModule invalid");
+        return;
+    }
 
     g_objectClass = BNM::Class("UnityEngine", "Object", core);
-    if (!g_objectClass.IsValid()) { LOGI("[GameApi] Object invalid"); return; }
+    if (!g_objectClass.IsValid()) {
+        LOGI("[GameApi] UnityEngine.Object invalid");
+        return;
+    }
 
     auto m = g_objectClass.GetMethod("FindObjectsOfType", 2);
     if (!m.IsValid()) {
-        LOGI("[GameApi] FindObjectsOfType(Type,bool) not found — fallback 1-arg");
+        LOGI("[GameApi] FindObjectsOfType(Type,bool) not found - fallback 1-arg");
         m = g_objectClass.GetMethod("FindObjectsOfType", 1);
     }
-    if (!m.IsValid()) { LOGI("[GameApi] FindObjectsOfType not found at all"); return; }
+    if (!m.IsValid()) {
+        LOGI("[GameApi] FindObjectsOfType not found at all");
+        return;
+    }
 
     LOGI("[GameApi] FindObjectsOfType = %s", m.str().c_str());
     g_ready = true;
@@ -44,16 +53,31 @@ bool IsReady() { return g_ready; }
 std::vector<Il2CppObject*> GetAllInstances(BNM::Class cls) {
     std::vector<Il2CppObject*> result;
 
-    if (!g_ready) { LOGI("[GameApi] not ready"); return result; }
-    if (!cls.IsValid()) { LOGI("[GameApi] invalid class"); return result; }
+    if (!g_ready) {
+        LOGI("[GameApi] not ready");
+        return result;
+    }
+    if (!cls.IsValid()) {
+        LOGI("[GameApi] invalid class");
+        return result;
+    }
 
+    // تبدیل Class به MonoType از طریق API رسمی BNM
     auto* monoType = cls.GetMonoType();
-    if (!monoType) { LOGI("[GameApi] GetMonoType null"); return result; }
+    if (!monoType) {
+        LOGI("[GameApi] GetMonoType null");
+        return result;
+    }
 
     auto findObjects = g_objectClass.GetMethod("FindObjectsOfType", 2);
     bool twoArg = findObjects.IsValid();
-    if (!twoArg) findObjects = g_objectClass.GetMethod("FindObjectsOfType", 1);
-    if (!findObjects.IsValid()) { LOGI("[GameApi] method gone"); return result; }
+    if (!twoArg) {
+        findObjects = g_objectClass.GetMethod("FindObjectsOfType", 1);
+    }
+    if (!findObjects.IsValid()) {
+        LOGI("[GameApi] method gone");
+        return result;
+    }
 
     ObjectArray* arr = nullptr;
 
@@ -71,8 +95,12 @@ std::vector<Il2CppObject*> GetAllInstances(BNM::Class cls) {
         return result;
     }
 
-    if (!arr) { LOGI("[GameApi] array null"); return result; }
+    if (!arr) {
+        LOGI("[GameApi] array null");
+        return result;
+    }
 
+    // تبدیل Array به vector با API رسمی BNM
     auto objects = arr->ToVector();
     LOGI("[GameApi] Unity returned %zu objects", objects.size());
 
@@ -112,8 +140,10 @@ std::string GetName(Il2CppObject* obj) {
 
 std::string Normalize(const std::string& s) {
     std::string n;
+    n.reserve(s.size());
     for (unsigned char c : s) {
-        if (std::isspace(c) || c == '_' || c == '-') continue;
+        if (std::isspace(c)) continue;
+        if (c == '_' || c == '-') continue;
         n += (char)std::toupper(c);
     }
     return n;
@@ -129,11 +159,14 @@ bool MatchesName(const std::string& actual,
 }
 
 bool SetInteractable(Il2CppObject* btn, bool value) {
-    if (!btn) return false;
+    if (!btn || !g_ready) return false;
+
     auto cls = BNM::Class(btn);
     if (!cls.IsValid()) return false;
+
     auto m = cls.GetMethod("set_interactable", 1);
     if (!m.IsValid()) return false;
+
     bool ok = false;
     auto ex = BNM::TryInvoke([&]() {
         m.cast<void>()[btn](value);
