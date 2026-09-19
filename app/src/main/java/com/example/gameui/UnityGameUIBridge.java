@@ -8,20 +8,20 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 
 public class UnityGameUIBridge {
 
     private static final String TAG = "LACMod-UI";
 
-    // ─── Native methods ────────────────────────────────
     public static native void nativeInit(UnityGameUIBridge self);
     public static native void nativeRequestStartGame();
     public static native void nativeRequestExit();
 
-    // ─── Singleton ─────────────────────────────────────
     private static UnityGameUIBridge sInstance;
 
     public static synchronized UnityGameUIBridge getInstance() {
@@ -31,24 +31,18 @@ public class UnityGameUIBridge {
         return sInstance;
     }
 
-    // ─── State ─────────────────────────────────────────
     private View mRootView = null;
     private Activity mCurrentActivity = null;
     private TextView mStatusText = null;
+    private TextView mLogText = null;
 
     private UnityGameUIBridge() {
         Log.i(TAG, "Bridge created");
     }
 
-    // ═══════════════════════════════════════════════════
-    // Public API (called from C++)
-    // ═══════════════════════════════════════════════════
-
     public void show(final Activity activity) {
         if (activity == null) return;
-
         mCurrentActivity = activity;
-
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -58,14 +52,7 @@ public class UnityGameUIBridge {
     }
 
     public void hide() {
-        if (mCurrentActivity == null) return;
-
-        mCurrentActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                removeView();
-            }
-        });
+        Log.i(TAG, "hide() ignored");
     }
 
     public void setGameState(int menu, boolean networkActive) {
@@ -73,66 +60,72 @@ public class UnityGameUIBridge {
     }
 
     public void setPlayerName(String name) {
-        // unused
     }
 
     public void showJoinNotification() {
-        updateStatus("Connecting...");
+        log("Join notification");
     }
 
     public void onCharacterEvent() {
-        // unused
     }
 
     public void onBackMenuEvent() {
-        // unused
     }
 
     public void onExitEvent() {
-        updateStatus("Disconnected");
+        log("Network exit");
     }
 
     public void showWelcomeOnce(Activity activity) {
-        // unused
     }
 
-    // ═══════════════════════════════════════════════════
-    // UI Building
-    // ═══════════════════════════════════════════════════
+    public void log(final String msg) {
+        Log.i(TAG, msg);
+        if (mCurrentActivity == null) return;
+        mCurrentActivity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (mLogText == null) return;
+                String cur = mLogText.getText().toString();
+                String next = cur + msg + "\n";
+                if (next.length() > 4000) {
+                    next = next.substring(next.length() - 4000);
+                }
+                mLogText.setText(next);
+            }
+        });
+    }
 
     private void addView(Activity activity) {
         if (mRootView != null) return;
 
         ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
 
-        // ─── Full-screen transparent container ───
         FrameLayout container = new FrameLayout(activity);
         container.setLayoutParams(new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT));
         container.setClickable(false);
 
-        // ─── Menu panel ───
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(40, 40, 40, 40);
+        panel.setPadding(30, 30, 30, 30);
 
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xDD1E1E1E);
+        bg.setColor(0xEE1E1E1E);
         bg.setCornerRadius(24f);
         bg.setStroke(3, 0xFF00E5FF);
         panel.setBackground(bg);
 
         FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
+            900,
             ViewGroup.LayoutParams.WRAP_CONTENT);
         panelLp.gravity = Gravity.TOP | Gravity.START;
-        panelLp.leftMargin = 60;
-        panelLp.topMargin = 200;
+        panelLp.leftMargin = 40;
+        panelLp.topMargin = 150;
         panel.setLayoutParams(panelLp);
         panel.setElevation(20f);
 
-        // ─── Title ───
         TextView title = new TextView(activity);
         title.setText("Mod Menu");
         title.setTextColor(0xFF00E5FF);
@@ -140,7 +133,6 @@ public class UnityGameUIBridge {
         title.setPadding(0, 0, 0, 20);
         panel.addView(title);
 
-        // ─── Status ───
         mStatusText = new TextView(activity);
         mStatusText.setText("idle");
         mStatusText.setTextColor(0xFFAAAAAA);
@@ -148,7 +140,6 @@ public class UnityGameUIBridge {
         mStatusText.setPadding(0, 0, 0, 20);
         panel.addView(mStatusText);
 
-        // ─── Join button ───
         Button joinBtn = new Button(activity);
         joinBtn.setText("Join Server");
         joinBtn.setTextColor(Color.WHITE);
@@ -159,44 +150,34 @@ public class UnityGameUIBridge {
         jbg.setCornerRadius(12f);
         joinBtn.setBackground(jbg);
         joinBtn.setPadding(30, 20, 30, 20);
-
         joinBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Log.i(TAG, "Join clicked");
+                log("--- Join clicked ---");
                 updateStatus("Joining...");
                 nativeRequestStartGame();
             }
         });
         panel.addView(joinBtn);
 
-        // ─── Close button ───
-        Button closeBtn = new Button(activity);
-        closeBtn.setText("Close");
-        closeBtn.setTextColor(Color.WHITE);
-        closeBtn.setTextSize(14);
-
-        GradientDrawable cbg = new GradientDrawable();
-        cbg.setColor(0xFFE53935);
-        cbg.setCornerRadius(12f);
-        closeBtn.setBackground(cbg);
-        closeBtn.setPadding(30, 20, 30, 20);
-
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+        ScrollView scroll = new ScrollView(activity);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
-        closeLp.topMargin = 20;
-        closeBtn.setLayoutParams(closeLp);
+            600);
+        scrollLp.topMargin = 20;
+        scroll.setLayoutParams(scrollLp);
+        scroll.setBackgroundColor(0xFF000000);
 
-        closeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                removeView();
-            }
-        });
-        panel.addView(closeBtn);
+        mLogText = new TextView(activity);
+        mLogText.setText("Waiting for native logs...\n");
+        mLogText.setTextColor(0xFF00FF00);
+        mLogText.setTextSize(10);
+        mLogText.setPadding(15, 15, 15, 15);
+        mLogText.setTypeface(Typeface.MONOSPACE);
+        mLogText.setTextIsSelectable(true);
+        scroll.addView(mLogText);
+        panel.addView(scroll);
 
-        // ─── Attach ───
         container.addView(panel);
         decor.addView(container);
         mRootView = container;
@@ -204,25 +185,9 @@ public class UnityGameUIBridge {
         Log.i(TAG, "Mod menu shown");
     }
 
-    private void removeView() {
-        if (mRootView == null) return;
-
-        ViewGroup parent = (ViewGroup) mRootView.getParent();
-        if (parent != null) {
-            parent.removeView(mRootView);
-        }
-
-        mRootView = null;
-        mStatusText = null;
-
-        Log.i(TAG, "Mod menu hidden");
-    }
-
     private void updateStatus(final String s) {
         Log.i(TAG, "status: " + s);
-
         if (mCurrentActivity == null) return;
-
         mCurrentActivity.runOnUiThread(new Runnable() {
             @Override
             public void run() {

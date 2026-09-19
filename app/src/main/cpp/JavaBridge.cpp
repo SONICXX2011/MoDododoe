@@ -16,6 +16,7 @@ jmethodID mid_showJoinNotification = nullptr;
 jmethodID mid_onCharacterEvent     = nullptr;
 jmethodID mid_onBackMenuEvent      = nullptr;
 jmethodID mid_onExitEvent          = nullptr;
+jmethodID mid_log                  = nullptr;
 
 static jobject GetActivity(JNIEnv* env) {
     jclass up = env->FindClass("com/unity3d/player/UnityPlayer");
@@ -23,17 +24,14 @@ static jobject GetActivity(JNIEnv* env) {
         env->ExceptionClear();
         return nullptr;
     }
-
     jfieldID fid = env->GetStaticFieldID(
         up,
         "currentActivity",
         "Landroid/app/Activity;");
-
     if (!fid) {
         env->ExceptionClear();
         return nullptr;
     }
-
     return env->GetStaticObjectField(up, fid);
 }
 
@@ -94,7 +92,12 @@ Java_com_example_gameui_UnityGameUIBridge_nativeInit(
         "onExitEvent",
         "()V");
 
-    LOGI("nativeInit: bridge cached");
+    mid_log = env->GetMethodID(
+        g_bridgeClass,
+        "log",
+        "(Ljava/lang/String;)V");
+
+    LOGI("nativeInit: bridge cached (log=%p)", mid_log);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -114,34 +117,25 @@ Java_com_example_gameui_UnityGameUIBridge_nativeRequestExit(
 
 static void CallVoid(jmethodID mid) {
     if (!mid || !g_bridgeInstance) return;
-
     bool detach = false;
     JNIEnv* env = nullptr;
-
     if (!AttachThread(&env, &detach)) return;
-
     env->CallVoidMethod(g_bridgeInstance, mid);
-
     if (env->ExceptionCheck()) env->ExceptionClear();
-
     DetachThreadIfNeeded(detach);
 }
 
 void JB_Show() {
     if (!mid_show || !g_bridgeInstance) return;
-
     bool detach = false;
     JNIEnv* env = nullptr;
-
     if (!AttachThread(&env, &detach)) return;
-
     jobject activity = GetActivity(env);
     if (activity) {
         env->CallVoidMethod(g_bridgeInstance, mid_show, activity);
         if (env->ExceptionCheck()) env->ExceptionClear();
         env->DeleteLocalRef(activity);
     }
-
     DetachThreadIfNeeded(detach);
 }
 
@@ -159,19 +153,26 @@ void JB_OnExitEvent() {
 
 void JB_SetGameState(int menu, bool networkActive) {
     if (!mid_setGameState || !g_bridgeInstance) return;
-
     bool detach = false;
     JNIEnv* env = nullptr;
-
     if (!AttachThread(&env, &detach)) return;
-
     env->CallVoidMethod(
         g_bridgeInstance,
         mid_setGameState,
         (jint) menu,
         (jboolean) networkActive);
-
     if (env->ExceptionCheck()) env->ExceptionClear();
+    DetachThreadIfNeeded(detach);
+}
 
+void JB_Log(const std::string& msg) {
+    if (!mid_log || !g_bridgeInstance) return;
+    bool detach = false;
+    JNIEnv* env = nullptr;
+    if (!AttachThread(&env, &detach)) return;
+    jstring jmsg = env->NewStringUTF(msg.c_str());
+    env->CallVoidMethod(g_bridgeInstance, mid_log, jmsg);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(jmsg);
     DetachThreadIfNeeded(detach);
 }

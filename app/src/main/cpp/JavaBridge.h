@@ -17,9 +17,9 @@ extern "C" {
         JNIEnv*, jclass);
 }
 
-// ─── Called from C++ side ───
 void JB_Show();
 void JB_Hide();
 void JB_SetGameState(int menu, bool networkActive);
 void JB_ShowJoinNotification();
 void JB_OnExitEvent();
+void JB_Log(const std::string& msg);
