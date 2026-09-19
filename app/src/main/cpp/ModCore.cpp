@@ -38,32 +38,19 @@ static void L(const char* fmt, ...) {
 }
 
 // ═══════════════════════════════════════════════════════
-// CLICK HANDLERS
+// CLICK HANDLERS — توابع C++ خالص (بدون BNM_CustomClass)
 // ═══════════════════════════════════════════════════════
-struct ClickHandlers : public BNM::IL2CPP::Il2CppObject {
-    BNM_CustomClass(ClickHandlers,
-        (BNM::CompileTimeClassBuilder("MyModMenu", "ClickHandlers").Build()),
-        BNM::Defaults::Get<BNM::IL2CPP::Il2CppObject>(),
-        BNM::CompileTimeClass());
-
-    static void OnCharacterClick();
-    static void OnBackMenuClick();
-    static void OnExitClick();
-
-    BNM_CustomMethod(OnCharacterClick, true, BNM::Defaults::Get<void>(), "OnCharacterClick");
-    BNM_CustomMethod(OnBackMenuClick,  true, BNM::Defaults::Get<void>(), "OnBackMenuClick");
-    BNM_CustomMethod(OnExitClick,      true, BNM::Defaults::Get<void>(), "OnExitClick");
-};
-
-void ClickHandlers::OnCharacterClick() {
+extern "C" void ClickHandler_Character() {
     LOGI("[CLICK] Character");
     JB_OnCharacterEvent();
 }
-void ClickHandlers::OnBackMenuClick() {
+
+extern "C" void ClickHandler_BackMenu() {
     LOGI("[CLICK] BackMenu");
     JB_OnBackMenuEvent();
 }
-void ClickHandlers::OnExitClick() {
+
+extern "C" void ClickHandler_Exit() {
     LOGI("[CLICK] Exit");
     JB_OnExitEvent();
 }
@@ -148,54 +135,43 @@ static void DoGetAllObjects() {
 }
 
 // ═══════════════════════════════════════════════════════
-// UNITYACTION DELEGATE
+// UNITYACTION DELEGATE (از تابع C++ خالص)
 // ═══════════════════════════════════════════════════════
-static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
-    if (!method.IsValid()) {
-        L("[DELEGATE] method invalid");
+static BNM::IL2CPP::Il2CppObject* CreateUnityActionFromCpp(void* cppFunc) {
+    if (!cppFunc) {
+        L("[DELEGATE] cppFunc null");
         return nullptr;
     }
 
-    auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
-    if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
-
-    BNM::Class uaCls("UnityEngine.Events", "UnityAction", imgCore);
-    if (!uaCls.IsValid()) {
-        L("[DELEGATE] UnityAction not found");
+    // ─── از System.Action استفاده می‌کنیم ───
+    BNM::Class actionCls("System", "Action");
+    if (!actionCls.IsValid()) {
+        L("[DELEGATE] System.Action not found");
         return nullptr;
     }
 
-    auto ctor = uaCls.GetMethod(".ctor", 2);
+    auto ctor = actionCls.GetMethod(".ctor", 2);
     if (!ctor.IsValid()) {
-        L("[DELEGATE] .ctor(2) not found");
+        L("[DELEGATE] System.Action .ctor(2) not found");
         return nullptr;
     }
 
-    auto* delegateObj = uaCls.CreateNewInstance();
-    if (!delegateObj) {
+    auto* delObj = actionCls.CreateNewInstance();
+    if (!delObj) {
         L("[DELEGATE] CreateNewInstance failed");
         return nullptr;
     }
 
-    void* fnPtr = (void*)method.GetInfo()->methodPointer;
-    if (!fnPtr) {
-        L("[DELEGATE] fnPtr null for %s", method.str().c_str());
-        return nullptr;
-    }
-
-    L("[DELEGATE] fnPtr=%p for %s", fnPtr, method.str().c_str());
+    L("[DELEGATE] cppFunc=%p", cppFunc);
 
     bool ok = false;
     auto ex = BNM::TryInvoke([&]() {
-        ctor[delegateObj].cast<void>()(
-            delegateObj,
-            fnPtr
-        );
+        ctor[delObj].cast<void>()(delObj, cppFunc);
         ok = true;
     });
 
     if (ex.IsValid()) {
-        L("[DELEGATE] ctor ex: %s", ex.Message().c_str());
+        L("[DELEGATE] ex: %s", ex.Message().c_str());
         return nullptr;
     }
 
@@ -204,9 +180,8 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
         return nullptr;
     }
 
-    L("[DELEGATE] created %p for %s",
-      (void*)delegateObj, method.str().c_str());
-    return delegateObj;
+    L("[DELEGATE] created %p", (void*)delObj);
+    return delObj;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -239,21 +214,10 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-2: done");
 
-    auto handlerCls = BNM::Class("MyModMenu", "ClickHandlers");
-    if (!handlerCls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
-
-    auto charMethod = handlerCls.GetMethod("OnCharacterClick", 0);
-    auto backMethod = handlerCls.GetMethod("OnBackMenuClick", 0);
-    auto exitMethod = handlerCls.GetMethod("OnExitClick", 0);
-    if (!charMethod.IsValid() || !backMethod.IsValid() || !exitMethod.IsValid()) {
-        L("[LISTENERS] methods not found");
-        return;
-    }
-    L("[LISTENERS] STAGE-3: methods ok");
-
-    auto* charDel = CreateUnityAction(charMethod);
-    auto* backDel = CreateUnityAction(backMethod);
-    auto* exitDel = CreateUnityAction(exitMethod);
+    // ─── ساخت delegateها از توابع C++ ───
+    auto* charDel = CreateUnityActionFromCpp((void*)&ClickHandler_Character);
+    auto* backDel = CreateUnityActionFromCpp((void*)&ClickHandler_BackMenu);
+    auto* exitDel = CreateUnityActionFromCpp((void*)&ClickHandler_Exit);
     if (!charDel || !backDel || !exitDel) {
         L("[LISTENERS] STAGE-4 failed: char=%p back=%p exit=%p",
           (void*)charDel, (void*)backDel, (void*)exitDel);
