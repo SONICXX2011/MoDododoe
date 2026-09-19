@@ -100,6 +100,7 @@ set(MOD_SRC
     main.cpp
     JavaBridge.cpp
     ModCore.cpp
+    GameApi.cpp
 )
 
 add_library(mymod SHARED

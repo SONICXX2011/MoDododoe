@@ -115,6 +115,8 @@ void JB_Show() {
 void JB_Hide()                 { CallVoid(mid_hide); }
 void JB_ShowJoinNotification() { CallVoid(mid_showJoinNotification); }
 void JB_OnExitEvent()          { CallVoid(mid_onExitEvent); }
+void JB_OnCharacterEvent()     { CallVoid(mid_onCharacterEvent); }
+void JB_OnBackMenuEvent()      { CallVoid(mid_onBackMenuEvent); }
 
 void JB_SetGameState(int menu, bool networkActive) {
     if (!mid_setGameState || !g_bridgeInstance) return;
