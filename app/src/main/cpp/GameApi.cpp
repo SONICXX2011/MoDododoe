@@ -8,25 +8,22 @@
 #define LOG_TAG "LACMod"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-// ─── امضاها ───
-// il2cpp_type_get_object: Il2CppType* → System.Type (Il2CppObject*)
 typedef BNM::IL2CPP::Il2CppObject* (*TypeGetObjectFn)(
     BNM::IL2CPP::Il2CppType*);
 
-// FindObjectsOfTypeAll: System.Type → Il2CppArray*
 typedef BNM::IL2CPP::Il2CppArray* (*FindObjectsOfTypeAllFn)(
     BNM::IL2CPP::Il2CppObject*);
 
 static TypeGetObjectFn g_typeGetObject = nullptr;
 static FindObjectsOfTypeAllFn g_findObjects = nullptr;
 static bool g_ready = false;
+static BNM::Class cls_ObjectBase;
 
 namespace GameApi {
 
 void Init() {
     if (g_ready) return;
 
-    // گرفتن libil2cpp handle از BNM
     void* lib = BNM::GetIl2CppLibraryHandle();
     if (!lib) {
         lib = dlopen("libil2cpp.so", RTLD_NOLOAD | RTLD_LAZY);
@@ -35,80 +32,83 @@ void Init() {
 
     if (lib) {
         g_typeGetObject = (TypeGetObjectFn)dlsym(lib, "il2cpp_type_get_object");
-        LOGI("[GameApi] il2cpp_type_get_object = %p", (void*)g_typeGetObject);
     }
 
-    // ICall: اول ResourcesAPIInternal (Unity 2020+), بعد Resources (قدیمی)
     g_findObjects = (FindObjectsOfTypeAllFn)BNM::GetExternMethod(
         "UnityEngine.ResourcesAPIInternal::FindObjectsOfTypeAll");
 
     if (!g_findObjects) {
-        LOGI("[GameApi] trying Resources::FindObjectsOfTypeAll");
         g_findObjects = (FindObjectsOfTypeAllFn)BNM::GetExternMethod(
             "UnityEngine.Resources::FindObjectsOfTypeAll");
     }
 
-    LOGI("[GameApi] FindObjectsOfTypeAll = %p", (void*)g_findObjects);
+    // کلاس پایه UnityEngine.Object برای خوندن m_CachedPtr
+    auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
+    if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
+    cls_ObjectBase = BNM::Class("UnityEngine", "Object", imgCore);
 
     g_ready = (g_findObjects != nullptr) && (g_typeGetObject != nullptr);
-    LOGI("[GameApi] Init: ready=%d (icall=%d type_get=%d)",
-         (int)g_ready, (int)(g_findObjects != nullptr),
-         (int)(g_typeGetObject != nullptr));
+    LOGI("[GameApi] Init: ready=%d", (int)g_ready);
 }
 
 bool IsReady() { return g_ready; }
 
+// ─── چک کردن زنده بودن آبجکت ───
+static bool IsAlive(BNM::IL2CPP::Il2CppObject* obj) {
+    if (!obj) return false;
+    try {
+        auto* ptr = (void*)((uint8_t*)obj + sizeof(void*) * 2);
+        uintptr_t cachedPtr = *(uintptr_t*)ptr;
+        return cachedPtr != 0;
+    } catch (...) { return false; }
+}
+
 std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls) {
     std::vector<BNM::IL2CPP::Il2CppObject*> result;
 
-    if (!g_findObjects || !g_typeGetObject) {
-        LOGI("[GameApi] not ready");
-        return result;
-    }
-    if (!cls.IsValid()) {
-        LOGI("[GameApi] class invalid");
-        return result;
-    }
+    if (!g_findObjects || !g_typeGetObject) return result;
+    if (!cls.IsValid()) return result;
 
     auto* il2cppType = cls.GetIl2CppType();
-    if (!il2cppType) {
-        LOGI("[GameApi] il2cppType NULL");
-        return result;
-    }
+    if (!il2cppType) return result;
 
     auto* typeObj = g_typeGetObject(il2cppType);
-    if (!typeObj) {
-        LOGI("[GameApi] typeObj NULL");
-        return result;
-    }
+    if (!typeObj) return result;
 
     auto* arr = g_findObjects(typeObj);
-    if (!arr) {
-        LOGI("[GameApi] ICall returned NULL");
-        return result;
-    }
+    if (!arr) return result;
 
     auto* bnArr = (BNM::Structures::Mono::Array<BNM::IL2CPP::Il2CppObject*>*)arr;
     auto cap = bnArr->GetCapacity();
-    LOGI("[GameApi] array capacity=%zu", (size_t)cap);
+    LOGI("[GameApi] raw array capacity=%zu", (size_t)cap);
 
     result.reserve(cap);
+    int dead = 0;
+
     for (size_t i = 0; i < cap; i++) {
         auto* o = *bnArr->At(i);
-        if (o) result.push_back(o);
+        if (!o) continue;
+
+        if (!IsAlive(o)) {
+            dead++;
+            continue;
+        }
+
+        result.push_back(o);
     }
 
+    LOGI("[GameApi] alive=%zu, dead=%d", result.size(), dead);
     return result;
 }
 
 std::string GetName(BNM::IL2CPP::Il2CppObject* obj) {
-    if (!obj) return "";
+    if (!obj || !IsAlive(obj)) return "";
     try {
         auto* go = BNM::Class(obj)
             .GetMethod("get_gameObject", 0)
             .cast<BNM::IL2CPP::Il2CppObject*>()
             [obj]();
-        if (!go) return "";
+        if (!go || !IsAlive(go)) return "";
 
         auto* n = BNM::Class(go)
             .GetMethod("get_name", 0)
@@ -138,7 +138,7 @@ bool MatchesName(const std::string& actual,
 }
 
 bool SetInteractable(BNM::IL2CPP::Il2CppObject* btn, bool value) {
-    if (!btn) return false;
+    if (!btn || !IsAlive(btn)) return false;
     try {
         BNM::Class(btn)
             .GetMethod("set_interactable", 1)
