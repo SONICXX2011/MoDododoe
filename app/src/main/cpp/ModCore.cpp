@@ -35,30 +35,19 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
-// ─── helper که جا افتاده بود ───
 static std::string ReadMonoString(BNM::Structures::Mono::String* s) {
     if (!s) return "";
     try { return s->str(); } catch (...) { return ""; }
 }
 
 // ═══════════════════════════════════════════════════════
-// CLASS CACHE
-// ═══════════════════════════════════════════════════════
-static BNM::Class cls_GtaMenu;
-static BNM::Class cls_NetworkManager;
-static BNM::Class cls_NetworkClient;
-static BNM::Class cls_CustomNetworkManager;
-static BNM::Class cls_Uri;
-
-// ═══════════════════════════════════════════════════════
 // CLICK HANDLERS (custom class)
 // ═══════════════════════════════════════════════════════
 struct ClickHandlers : public BNM::IL2CPP::Il2CppObject {
     BNM_CustomClass(ClickHandlers,
-        BNM::CompileTimeClassBuilder("MyModMenu", "ClickHandlers").Build(),
+        (BNM::CompileTimeClassBuilder("MyModMenu", "ClickHandlers").Build()),
         BNM::Defaults::Get<BNM::IL2CPP::Il2CppObject>(),
-        BNM::CompileTimeClass()
-    );
+        BNM::CompileTimeClass());
 
     static void OnCharacterClick();
     static void OnBackMenuClick();
@@ -81,6 +70,15 @@ void ClickHandlers::OnExitClick() {
     LOGI("[CLICK] Exit");
     JB_OnExitEvent();
 }
+
+// ═══════════════════════════════════════════════════════
+// CLASS CACHE
+// ═══════════════════════════════════════════════════════
+static BNM::Class cls_GtaMenu;
+static BNM::Class cls_NetworkManager;
+static BNM::Class cls_NetworkClient;
+static BNM::Class cls_CustomNetworkManager;
+static BNM::Class cls_Uri;
 
 // ═══════════════════════════════════════════════════════
 // FLAGS
