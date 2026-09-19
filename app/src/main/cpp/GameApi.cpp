@@ -2,6 +2,9 @@
 
 #include <android/log.h>
 #include <dlfcn.h>
+#include <signal.h>
+#include <setjmp.h>
+#include <cstring>
 #include <algorithm>
 #include <cctype>
 
@@ -15,17 +18,58 @@ static TypeGetObjectFn g_typeGetObject = nullptr;
 static bool g_ready = false;
 static BNM::Class cls_Object;
 
+// ═══════════════════════════════════════════════════════
+// SIGSEGV trap دائمی (نصب یک بار)
+// ═══════════════════════════════════════════════════════
+static sigjmp_buf g_jmp;
+static volatile sig_atomic_t g_trap_active = 0;
+static struct sigaction g_old_segv;
+static bool g_trap_installed = false;
+
+static void trap_handler(int sig) {
+    if (g_trap_active) {
+        g_trap_active = 0;
+        siglongjmp(g_jmp, 1);
+    }
+    sigaction(sig, &g_old_segv, nullptr);
+    raise(sig);
+}
+
+static void InstallTrap() {
+    if (g_trap_installed) return;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = trap_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NODEFER;
+    sigaction(SIGSEGV, &sa, &g_old_segv);
+    g_trap_installed = true;
+    LOGI("[GameApi] SIGSEGV trap installed");
+}
+
+template <typename Fn>
+static bool SafeRun(Fn&& fn) {
+    if (sigsetjmp(g_jmp, 1) == 0) {
+        g_trap_active = 1;
+        fn();
+        g_trap_active = 0;
+        return true;
+    }
+    g_trap_active = 0;
+    return false;
+}
+
 namespace GameApi {
 
 void Init() {
     if (g_ready) return;
+    InstallTrap();
 
     void* lib = BNM::GetIl2CppLibraryHandle();
     if (!lib) {
         lib = dlopen("libil2cpp.so", RTLD_NOLOAD | RTLD_LAZY);
         if (!lib) lib = dlopen("libil2cpp.so", RTLD_LAZY);
     }
-
     if (lib) {
         g_typeGetObject = (TypeGetObjectFn)dlsym(lib, "il2cpp_type_get_object");
     }
@@ -42,64 +86,103 @@ void Init() {
 
 bool IsReady() { return g_ready; }
 
+// ─── ۳ لایه فیلتر ───
+static bool IsFullyAlive(BNM::IL2CPP::Il2CppObject* obj) {
+    if (!obj) return false;
+
+    // لایه ۱: m_CachedPtr != 0
+    bool layer1 = false;
+    SafeRun([&]() {
+        uintptr_t cached = *(uintptr_t*)((uint8_t*)obj + sizeof(void*) * 2);
+        layer1 = (cached != 0);
+    });
+    if (!layer1) return false;
+
+    // لایه ۲: get_gameObject != null
+    BNM::IL2CPP::Il2CppObject* go = nullptr;
+    SafeRun([&]() {
+        go = BNM::Class(obj)
+            .GetMethod("get_gameObject", 0)
+            .cast<BNM::IL2CPP::Il2CppObject*>()
+            [obj]();
+    });
+    if (!go) return false;
+
+    // لایه ۳: get_name != null و غیرخالی
+    bool layer3 = false;
+    SafeRun([&]() {
+        auto* n = BNM::Class(go)
+            .GetMethod("get_name", 0)
+            .cast<BNM::Structures::Mono::String*>()
+            [go]();
+        layer3 = (n != nullptr && n->length > 0);
+    });
+    return layer3;
+}
+
 std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls) {
     std::vector<BNM::IL2CPP::Il2CppObject*> result;
 
     if (!g_typeGetObject || !cls_Object.IsValid()) return result;
     if (!cls.IsValid()) return result;
 
-    // Il2CppType* → System.Type
     auto* il2cppType = cls.GetIl2CppType();
     if (!il2cppType) return result;
 
     auto* typeObj = g_typeGetObject(il2cppType);
     if (!typeObj) return result;
 
-    // Object.FindObjectsOfType(Type, bool) ← فقط scene objects
+    // FindObjectsOfType(Type, bool) — فقط scene objects
     auto m = cls_Object.GetMethod("FindObjectsOfType", 2);
     if (!m.IsValid()) {
         LOGI("[GameApi] FindObjectsOfType not found");
         return result;
     }
 
-    // includeInactive = true
     auto* arr = m
         .cast<BNM::Structures::Mono::Array<BNM::IL2CPP::Il2CppObject*>*>()
         .Call(typeObj, true);
 
-    if (!arr) {
-        LOGI("[GameApi] FindObjectsOfType returned NULL");
-        return result;
-    }
+    if (!arr) return result;
 
     auto cap = arr->GetCapacity();
-    LOGI("[GameApi] live scene objects=%zu", (size_t)cap);
+    LOGI("[GameApi] raw=%zu", (size_t)cap);
 
     result.reserve(cap);
+    int skipped = 0;
+
     for (size_t i = 0; i < cap; i++) {
-        auto* o = *arr->At(i);
-        if (o) result.push_back(o);
+        BNM::IL2CPP::Il2CppObject* o = nullptr;
+        SafeRun([&]() { o = *arr->At(i); });
+        if (!o) { skipped++; continue; }
+
+        if (!IsFullyAlive(o)) { skipped++; continue; }
+
+        result.push_back(o);
     }
 
+    LOGI("[GameApi] alive=%zu skipped=%d", result.size(), skipped);
     return result;
 }
 
 std::string GetName(BNM::IL2CPP::Il2CppObject* obj) {
     if (!obj) return "";
-    try {
+    std::string out;
+    SafeRun([&]() {
         auto* go = BNM::Class(obj)
             .GetMethod("get_gameObject", 0)
             .cast<BNM::IL2CPP::Il2CppObject*>()
             [obj]();
-        if (!go) return "";
+        if (!go) return;
 
         auto* n = BNM::Class(go)
             .GetMethod("get_name", 0)
             .cast<BNM::Structures::Mono::String*>()
             [go]();
-        if (!n) return "";
-        return n->str();
-    } catch (...) { return ""; }
+        if (!n) return;
+        out = n->str();
+    });
+    return out;
 }
 
 std::string Normalize(const std::string& s) {
@@ -122,13 +205,15 @@ bool MatchesName(const std::string& actual,
 
 bool SetInteractable(BNM::IL2CPP::Il2CppObject* btn, bool value) {
     if (!btn) return false;
-    try {
+    bool ok = false;
+    SafeRun([&]() {
         BNM::Class(btn)
             .GetMethod("set_interactable", 1)
             .cast<void>()
             [btn](value);
-        return true;
-    } catch (...) { return false; }
+        ok = true;
+    });
+    return ok;
 }
 
 } // namespace GameApi

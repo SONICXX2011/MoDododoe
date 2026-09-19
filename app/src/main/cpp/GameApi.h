@@ -15,7 +15,7 @@ namespace GameApi {
 void Init();
 bool IsReady();
 
-// فقط آبجکت‌های زنده‌ی توی صحنه (بدون prefab)
+// فقط آبجکت‌های زنده (با ۳ لایه فیلتر)
 std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls);
 
 std::string GetName(BNM::IL2CPP::Il2CppObject* obj);
