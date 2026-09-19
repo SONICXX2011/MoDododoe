@@ -21,6 +21,8 @@ public class UnityGameUIBridge {
     public static native void nativeInit(UnityGameUIBridge self);
     public static native void nativeRequestStartGame();
     public static native void nativeRequestExit();
+    public static native void nativeDumpStartClient();
+    public static native void nativeDisableButtons();
 
     private static UnityGameUIBridge sInstance;
 
@@ -140,11 +142,14 @@ public class UnityGameUIBridge {
         mStatusText.setPadding(0, 0, 0, 20);
         panel.addView(mStatusText);
 
+        // ─── ردیف اول دکمه‌ها ───
+        LinearLayout row1 = new LinearLayout(activity);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+
         Button joinBtn = new Button(activity);
         joinBtn.setText("Join Server");
         joinBtn.setTextColor(Color.WHITE);
-        joinBtn.setTextSize(14);
-
+        joinBtn.setTextSize(12);
         GradientDrawable jbg = new GradientDrawable();
         jbg.setColor(0xFF00C853);
         jbg.setCornerRadius(12f);
@@ -158,8 +163,53 @@ public class UnityGameUIBridge {
                 nativeRequestStartGame();
             }
         });
-        panel.addView(joinBtn);
+        row1.addView(joinBtn);
 
+        Button dumpBtn = new Button(activity);
+        dumpBtn.setText("Dump StartClient");
+        dumpBtn.setTextColor(Color.WHITE);
+        dumpBtn.setTextSize(12);
+        GradientDrawable dbg = new GradientDrawable();
+        dbg.setColor(0xFF2196F3);
+        dbg.setCornerRadius(12f);
+        dumpBtn.setBackground(dbg);
+        dumpBtn.setPadding(30, 20, 30, 20);
+        dumpBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                log("--- Dump StartClient clicked ---");
+                nativeDumpStartClient();
+            }
+        });
+        row1.addView(dumpBtn);
+
+        panel.addView(row1);
+
+        // ─── ردیف دوم دکمه‌ها ───
+        LinearLayout row2 = new LinearLayout(activity);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button disableBtn = new Button(activity);
+        disableBtn.setText("Disable Buttons");
+        disableBtn.setTextColor(Color.WHITE);
+        disableBtn.setTextSize(12);
+        GradientDrawable disbg = new GradientDrawable();
+        disbg.setColor(0xFF9C27B0);
+        disbg.setCornerRadius(12f);
+        disableBtn.setBackground(disbg);
+        disableBtn.setPadding(30, 20, 30, 20);
+        disableBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                log("--- Disable Buttons clicked ---");
+                nativeDisableButtons();
+            }
+        });
+        row2.addView(disableBtn);
+
+        panel.addView(row2);
+
+        // ─── کنسول لاگ ───
         ScrollView scroll = new ScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,

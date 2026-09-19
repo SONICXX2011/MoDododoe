@@ -129,38 +129,6 @@ static void Hook_Button_Awake(BNM::IL2CPP::Il2CppObject* self) {
 
     LOGI("Button.Awake: %s", nm.c_str());
     JB_Log("Btn: " + nm);
-
-    if (NameMatches(nm, { "LACEDITOR", "COMMUNITY", "DOCUMENT" })) {
-        L(">>> MATCHED: %s <<<", nm.c_str());
-        
-        if (cls_Selectable.IsValid()) {
-            try {
-                cls_Selectable.GetMethod("set_interactable", 1)
-                    .cast<void>()
-                    .Call(self, false);
-                std::lock_guard<std::mutex> lk(g_btnMtx);
-                g_disabled.insert(key);
-                L("DISABLED (Selectable): %s", nm.c_str());
-            } catch (const std::exception& e) {
-                L("Selectable fail: %s", e.what());
-            } catch (...) {
-                L("Selectable fail: unknown");
-            }
-        }
-        
-        if (cls_Button.IsValid()) {
-            try {
-                cls_Button.GetMethod("set_interactable", 1)
-                    .cast<void>()
-                    .Call(self, false);
-                std::lock_guard<std::mutex> lk(g_btnMtx);
-                g_disabled.insert(key);
-                L("DISABLED (Button): %s", nm.c_str());
-            } catch (...) {
-                L("Button disable fail: %s", nm.c_str());
-            }
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -195,7 +163,204 @@ static bool GetNetworkActive() {
 }
 
 // ═══════════════════════════════════════════════════════
-// DirectConnect — اصلاح شده
+// Dump StartClient Info — دکمه جدید
+// ═══════════════════════════════════════════════════════
+void DumpStartClientInfo() {
+    L("═══════════════════════════════════════");
+    L("DUMP: NetworkManager info");
+    L("═══════════════════════════════════════");
+
+    // NetworkManager
+    if (cls_NetworkManager.IsValid()) {
+        L("[NM] valid=1");
+        
+        L("[NM] Methods:");
+        try {
+            auto methods = cls_NetworkManager.GetMethods();
+            for (auto& m : methods) {
+                try {
+                    L("  %s", m.str().c_str());
+                } catch (...) {
+                    L("  <method>");
+                }
+            }
+        } catch (...) {
+            L("  GetMethods failed");
+        }
+        
+        L("[NM] Fields:");
+        try {
+            auto fields = cls_NetworkManager.GetFields();
+            for (auto& f : fields) {
+                try {
+                    L("  %s", f.str().c_str());
+                } catch (...) {
+                    L("  <field>");
+                }
+            }
+        } catch (...) {
+            L("  GetFields failed");
+        }
+    } else {
+        L("[NM] valid=0");
+    }
+
+    L("═══════════════════════════════════════");
+    L("DUMP: CustomNetworkManager info");
+    L("═══════════════════════════════════════");
+
+    if (cls_CustomNetworkManager.IsValid()) {
+        L("[CNM] valid=1");
+        
+        L("[CNM] Methods:");
+        try {
+            auto methods = cls_CustomNetworkManager.GetMethods();
+            for (auto& m : methods) {
+                try {
+                    L("  %s", m.str().c_str());
+                } catch (...) {
+                    L("  <method>");
+                }
+            }
+        } catch (...) {
+            L("  GetMethods failed");
+        }
+        
+        L("[CNM] Fields:");
+        try {
+            auto fields = cls_CustomNetworkManager.GetFields();
+            for (auto& f : fields) {
+                try {
+                    L("  %s", f.str().c_str());
+                } catch (...) {
+                    L("  <field>");
+                }
+            }
+        } catch (...) {
+            L("  GetFields failed");
+        }
+    } else {
+        L("[CNM] valid=0");
+    }
+
+    L("═══════════════════════════════════════");
+    L("DUMP: NetworkClient info");
+    L("═══════════════════════════════════════");
+
+    if (cls_NetworkClient.IsValid()) {
+        L("[NC] valid=1");
+        
+        L("[NC] Methods:");
+        try {
+            auto methods = cls_NetworkClient.GetMethods();
+            for (auto& m : methods) {
+                try {
+                    L("  %s", m.str().c_str());
+                } catch (...) {
+                    L("  <method>");
+                }
+            }
+        } catch (...) {
+            L("  GetMethods failed");
+        }
+    } else {
+        L("[NC] valid=0");
+    }
+
+    L("═══════════════════════════════════════");
+    L("DUMP: GtaMenuControl info");
+    L("═══════════════════════════════════════");
+
+    if (cls_GtaMenu.IsValid()) {
+        L("[GTA] valid=1");
+        
+        L("[GTA] Methods:");
+        try {
+            auto methods = cls_GtaMenu.GetMethods();
+            for (auto& m : methods) {
+                try {
+                    L("  %s", m.str().c_str());
+                } catch (...) {
+                    L("  <method>");
+                }
+            }
+        } catch (...) {
+            L("  GetMethods failed");
+        }
+        
+        L("[GTA] Fields:");
+        try {
+            auto fields = cls_GtaMenu.GetFields();
+            for (auto& f : fields) {
+                try {
+                    L("  %s", f.str().c_str());
+                } catch (...) {
+                    L("  <field>");
+                }
+            }
+        } catch (...) {
+            L("  GetFields failed");
+        }
+    } else {
+        L("[GTA] valid=0");
+    }
+
+    L("═══════════════════════════════════════");
+    L("DUMP: DONE");
+    L("═══════════════════════════════════════");
+}
+
+// ═══════════════════════════════════════════════════════
+// Disable Mod Buttons — دکمه جدید
+// ═══════════════════════════════════════════════════════
+void DisableModButtons() {
+    L("--- DisableModButtons ---");
+
+    std::lock_guard<std::mutex> lk(g_btnMtx);
+    int disabled = 0;
+
+    for (auto& b : g_buttons) {
+        if (NameMatches(b.name, {"LACEDITOR", "COMMUNITY", "DOCUMENT"})) {
+            void* key = (void*)b.obj;
+            if (g_disabled.count(key)) continue;
+
+            bool ok = false;
+
+            // روش ۱: Selectable.set_interactable
+            if (cls_Selectable.IsValid()) {
+                try {
+                    cls_Selectable.GetMethod("set_interactable", 1)
+                        .cast<void>()
+                        .Call(b.obj, false);
+                    ok = true;
+                } catch (...) {}
+            }
+
+            // روش ۲: Button.set_interactable
+            if (!ok && cls_Button.IsValid()) {
+                try {
+                    cls_Button.GetMethod("set_interactable", 1)
+                        .cast<void>()
+                        .Call(b.obj, false);
+                    ok = true;
+                } catch (...) {}
+            }
+
+            if (ok) {
+                g_disabled.insert(key);
+                disabled++;
+                L("DISABLED: %s", b.name.c_str());
+            } else {
+                L("FAIL disable: %s", b.name.c_str());
+            }
+        }
+    }
+
+    L("DisableModButtons done: %d buttons", disabled);
+}
+
+// ═══════════════════════════════════════════════════════
+// DirectConnect
 // ═══════════════════════════════════════════════════════
 static bool DirectConnect() {
     L("[DC] === START ===");
@@ -213,13 +378,11 @@ static bool DirectConnect() {
     char buf[64];
     snprintf(buf, sizeof(buf), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
 
-    // روش ۱: CreateNewObjectParameters
     BNM::IL2CPP::Il2CppObject* uri = nullptr;
     try {
         uri = uriCls.CreateNewObjectParameters(BNM::CreateMonoString(buf));
     } catch (...) {}
     
-    // روش ۲: alloc + ctor
     if (!uri) {
         try {
             uri = uriCls.CreateNewInstance();
@@ -237,35 +400,33 @@ static bool DirectConnect() {
     }
     L("[DC] uri=%s -> %p", buf, (void*)uri);
 
-    // ─── ۲. تلاش با CustomNetworkManager ───
+    // ─── ۲. CustomNetworkManager ───
     if (cls_CustomNetworkManager.IsValid()) {
         L("[DC] Trying CustomNetworkManager");
         
         try {
-            // singleton
             auto* mgr = cls_CustomNetworkManager.GetMethod("get_singleton", 0)
                             .cast<BNM::IL2CPP::Il2CppObject*>()
                             .Call();
             
             if (mgr) {
-                L("[DC] Custom.singleton=%p", (void*)mgr);
+                L("[DC] CNM.singleton=%p", (void*)mgr);
                 
-                // StartClient(Uri)
                 auto startClient = cls_CustomNetworkManager.GetMethod("StartClient", 1);
                 if (startClient.IsValid()) {
                     startClient.cast<void>().Call(mgr, uri);
-                    L("[DC] Custom.StartClient(Uri) CALLED");
+                    L("[DC] CNM.StartClient(Uri) CALLED");
                     return true;
                 }
             }
         } catch (const std::exception& e) {
-            L("[DC] Custom ex: %s", e.what());
+            L("[DC] CNM ex: %s", e.what());
         } catch (...) {
-            L("[DC] Custom ex unknown");
+            L("[DC] CNM ex unknown");
         }
     }
 
-    // ─── ۳. تلاش با NetworkManager ───
+    // ─── ۳. NetworkManager ───
     if (cls_NetworkManager.IsValid()) {
         L("[DC] Trying NetworkManager");
         
@@ -277,7 +438,7 @@ static bool DirectConnect() {
             if (mgr) {
                 L("[DC] NM.singleton=%p", (void*)mgr);
                 
-                // روش ۱: StartClient(Uri)
+                // StartClient(Uri)
                 auto startClient = cls_NetworkManager.GetMethod("StartClient", 1);
                 if (startClient.IsValid()) {
                     startClient.cast<void>().Call(mgr, uri);
@@ -285,11 +446,11 @@ static bool DirectConnect() {
                     return true;
                 }
                 
-                // روش ۲: networkAddress + StartClient()
+                // networkAddress + StartClient()
                 try {
                     cls_NetworkManager.GetField("networkAddress")
                         .cast<BNM::Structures::Mono::String*>()
-                        .Set(mgr, BNM::CreateMonoString(buf));
+                        .Set(BNM::CreateMonoString(buf));
                     L("[DC] networkAddress set");
                     
                     auto sc0 = cls_NetworkManager.GetMethod("StartClient", 0);
@@ -298,8 +459,10 @@ static bool DirectConnect() {
                         L("[DC] NM.StartClient() CALLED");
                         return true;
                     }
+                } catch (const std::exception& e) {
+                    L("[DC] networkAddress fail: %s", e.what());
                 } catch (...) {
-                    L("[DC] networkAddress method failed");
+                    L("[DC] networkAddress fail unknown");
                 }
             }
         } catch (const std::exception& e) {
@@ -405,7 +568,6 @@ void InstallGameHooks() {
     L("NetworkClient=%d", (int)cls_NetworkClient.IsValid());
     L("CustomNetworkManager=%d", (int)cls_CustomNetworkManager.IsValid());
 
-    // ─── Button.Awake hook ───
     if (cls_Button.IsValid()) {
         auto awake = cls_Button.GetMethod("Awake", 0);
         void* addr = (void*)awake.GetOffset();
@@ -423,8 +585,6 @@ void InstallGameHooks() {
                 L("Button.Awake hook FAIL err=%d", shadowhook_get_errno());
             }
         }
-    } else {
-        L("Button class invalid");
     }
 
     L("=== done ===");
