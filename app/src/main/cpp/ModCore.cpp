@@ -40,6 +40,7 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
+// ═══════════════════════════════════════════════════════
 static BNM::Class cls_GtaMenu;
 static BNM::Class cls_Button;
 static BNM::Class cls_Selectable;
@@ -59,7 +60,9 @@ static std::unordered_set<void*>  g_known;
 
 static std::atomic<bool> g_running{false};
 static std::thread       g_loopThread;
+static std::atomic<bool> g_buttonsReady{false};
 
+// ═══════════════════════════════════════════════════════
 static std::string GetGameObjectName(BNM::IL2CPP::Il2CppObject* comp) {
     if (!comp) return "";
     try {
@@ -123,8 +126,15 @@ static bool GetNetworkActive() {
     } catch (...) { return false; }
 }
 
-static void ScanButtons() {
-    if (!cls_Button.IsValid()) return;
+// ═══════════════════════════════════════════════════════
+// پیدا کردن دکمه‌ها — از FindObjectOfType استفاده می‌کنیم
+// روی Android بعضی متدها حذف شدن، پس fallback داریم
+// ═══════════════════════════════════════════════════════
+static void ScanButtonsOnce() {
+    if (!cls_Button.IsValid()) {
+        LOGE("ScanButtons: Button class invalid");
+        return;
+    }
 
     try {
         auto clsUnityObject = BNM::Class(
@@ -132,43 +142,47 @@ static void ScanButtons() {
             BNM::Image("UnityEngine.CoreModule.dll"));
         if (!clsUnityObject.IsValid()) return;
 
+        auto* typePtr = cls_Button.GetIl2CppType();
+        if (!typePtr) { LOGE("Type ptr null"); return; }
+
         BNM::IL2CPP::Il2CppArray* arr = nullptr;
 
+        // روش ۱: FindObjectsByType
         try {
             auto m = clsUnityObject.GetMethod("FindObjectsByType", 2);
             if (m.IsValid()) {
-                auto* typePtr = cls_Button.GetIl2CppType();
-                if (typePtr) {
-                    arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
-                           .Call(typePtr, (int)0);
-                }
+                arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
+                       .Call(typePtr, (int)0);
+                if (arr) LOGI("FindObjectsByType OK");
             }
         } catch (...) {}
 
+        // روش ۲: FindObjectsOfType(Type, bool)
+        if (!arr) {
+            try {
+                auto m = clsUnityObject.GetMethod("FindObjectsOfType", 2);
+                if (m.IsValid()) {
+                    arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
+                           .Call(typePtr, false);
+                    if (arr) LOGI("FindObjectsOfType(Type,bool) OK");
+                }
+            } catch (...) {}
+        }
+
+        // روش ۳: FindObjectsOfType(Type)
         if (!arr) {
             try {
                 auto m = clsUnityObject.GetMethod("FindObjectsOfType", 1);
                 if (m.IsValid()) {
-                    auto* typePtr = cls_Button.GetIl2CppType();
-                    if (typePtr) {
-                        arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
-                               .Call(typePtr);
-                    }
+                    arr = m.cast<BNM::IL2CPP::Il2CppArray*>()
+                           .Call(typePtr);
+                    if (arr) LOGI("FindObjectsOfType(Type) OK");
                 }
             } catch (...) {}
         }
 
         if (!arr) {
-            try {
-                auto m = clsUnityObject.GetMethod("FindObjectsOfType", 0);
-                if (m.IsValid()) {
-                    arr = m.cast<BNM::IL2CPP::Il2CppArray*>().Call();
-                }
-            } catch (...) {}
-        }
-
-        if (!arr) {
-            LOGE("ScanButtons: no Find method worked");
+            LOGE("ScanButtons: all Find methods failed");
             return;
         }
 
@@ -177,6 +191,7 @@ static void ScanButtons() {
 
         int len = (int) objArr->capacity;
         LOGI("ScanButtons: found %d buttons", len);
+        JB_Log("Found " + std::to_string(len) + " buttons");
 
         std::lock_guard<std::recursive_mutex> lk(g_btnMtx);
 
@@ -195,6 +210,8 @@ static void ScanButtons() {
             LOGI("Found Button: %s", nm.c_str());
             JB_Log("Btn: " + nm);
         }
+
+        g_buttonsReady = true;
     } catch (const std::exception& e) {
         LOGE("ScanButtons ex: %s", e.what());
     } catch (...) {
@@ -203,12 +220,16 @@ static void ScanButtons() {
 }
 
 static void DisableButtonsFromList() {
+    if (!g_buttonsReady) return;
+
     std::lock_guard<std::recursive_mutex> lk(g_btnMtx);
 
+    int total = 0, done = 0;
     for (auto& b : g_buttons) {
         if (b.disabled) continue;
         if (!NameMatches(b.name, {"LACEDITOR", "COMMUNITY", "DOCUMENT"})) continue;
 
+        total++;
         bool ok = false;
 
         if (cls_Selectable.IsValid()) {
@@ -231,18 +252,29 @@ static void DisableButtonsFromList() {
 
         if (ok) {
             b.disabled = true;
+            done++;
             L("DISABLED: %s", b.name.c_str());
         }
     }
+
+    if (total > 0 && done == 0) {
+        L("Wanted to disable %d, failed all", total);
+    }
 }
 
+// ═══════════════════════════════════════════════════════
+// این تابع فقط از main thread (il2cpp thread) صدا زده بشه
+// ═══════════════════════════════════════════════════════
 void DisableModButtons() {
     L("--- DisableModButtons ---");
-    ScanButtons();
+    if (!g_buttonsReady) {
+        ScanButtonsOnce();
+    }
     DisableButtonsFromList();
     L("--- done ---");
 }
 
+// ═══════════════════════════════════════════════════════
 void DumpStartClientInfo() {
     L("═══════ DUMP START ═══════");
 
@@ -258,6 +290,9 @@ void DumpStartClientInfo() {
     L("═══════ DUMP END ═══════");
 }
 
+// ═══════════════════════════════════════════════════════
+// DirectConnect — دو روش رو با هم امتحان می‌کنیم
+// ═══════════════════════════════════════════════════════
 static bool DirectConnect() {
     L("[DC] === START ===");
 
@@ -275,36 +310,40 @@ static bool DirectConnect() {
     }
     L("[DC] CNM.singleton=%p", (void*)mgr);
 
+    // ─── مرحله ۱: ست کردن networkAddress ───
     try {
         auto fld = cls_NetworkManager.GetField("networkAddress")
                        .cast<BNM::Structures::Mono::String*>();
-
         if (fld.IsValid()) {
             fld[mgr];
             fld.Set(BNM::CreateMonoString(SERVER_IP));
             L("[DC] NM.networkAddress=%s", SERVER_IP);
-
-            auto fld2 = cls_NetworkManager.GetField("networkAddress")
-                            .cast<BNM::Structures::Mono::String*>();
-            fld2[mgr];
-            auto* got = fld2.Get();
-            if (got) {
-                L("[DC] verify addr=%s", got->str().c_str());
-            }
-        } else {
-            L("[DC] networkAddress field invalid");
         }
-    } catch (const std::exception& e) {
-        L("[DC] set networkAddress ex: %s", e.what());
     } catch (...) {
-        L("[DC] set networkAddress unknown ex");
+        L("[DC] set networkAddress failed");
     }
 
+    // ─── مرحله ۲: StartClient() بدون آرگومان (اولویت اول) ───
+    try {
+        auto m = cls_CustomNetworkManager.GetMethod("StartClient", 0);
+        if (m.IsValid()) {
+            m.cast<void>().Call(mgr);
+            L("[DC] CNM.StartClient() OK");
+            return true;
+        } else {
+            L("[DC] StartClient() not found");
+        }
+    } catch (const std::exception& e) {
+        L("[DC] StartClient() ex: %s", e.what());
+    } catch (...) {
+        L("[DC] StartClient() unknown ex");
+    }
+
+    // ─── مرحله ۳: StartClient(Uri) به عنوان fallback ───
     try {
         BNM::Class uriCls("System", "Uri", BNM::Image("System.dll"));
         if (!uriCls.IsValid())
             uriCls = BNM::Class("System", "Uri", BNM::Image("mscorlib.dll"));
-
         if (!uriCls.IsValid()) {
             L("[DC] FAIL: Uri missing");
             return false;
@@ -319,7 +358,7 @@ static bool DirectConnect() {
             L("[DC] FAIL: Uri alloc");
             return false;
         }
-        L("[DC] uri=%s obj=%p", uri, (void*)uriObj);
+        L("[DC] uri=%s", uri);
 
         auto m = cls_CustomNetworkManager.GetMethod("StartClient", 1);
         if (m.IsValid()) {
@@ -328,46 +367,44 @@ static bool DirectConnect() {
             return true;
         }
     } catch (const std::exception& e) {
-        L("[DC] StartClient ex: %s", e.what());
+        L("[DC] StartClient(Uri) ex: %s", e.what());
     } catch (...) {
-        L("[DC] StartClient unknown ex");
+        L("[DC] StartClient(Uri) unknown ex");
     }
 
     L("[DC] FAIL");
     return false;
 }
 
+// ═══════════════════════════════════════════════════════
 void TriggerStartGame() {
     std::thread([]() {
-        BNM::AttachIl2Cpp();
-        L("--- StartGame (attached) ---");
+        L("--- StartGame thread ---");
 
-        g_state.networkSuppressed = true;
-
+        // صبر کن GtaMenu آماده بشه
         for (int i = 0; i < 100 && !GetGtaMenu(); i++)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         if (!GetGtaMenu()) {
             L("[SG] FAIL: GtaMenu not ready");
-            BNM::DetachIl2Cpp();
             return;
         }
 
         JB_ShowJoinNotification();
         bool ok = DirectConnect();
         L("[SG] connect=%d", (int)ok);
-
-        BNM::DetachIl2Cpp();
     }).detach();
 }
 
+// ═══════════════════════════════════════════════════════
+// StateLoop — بدون AttachIl2Cpp (چون از خود il2cpp thread صدا زده میشه)
+// ═══════════════════════════════════════════════════════
 static void StateLoop() {
-    BNM::AttachIl2Cpp();
-    L("StateLoop: attached");
+    L("StateLoop: started");
 
     using clock = std::chrono::steady_clock;
-    auto last       = clock::now();
-    auto lastBtn    = clock::now();
+    auto last    = clock::now();
+    auto lastBtn = clock::now();
 
     while (g_running) {
         auto now = clock::now();
@@ -392,17 +429,19 @@ static void StateLoop() {
 
         JB_SetGameState(menu, network);
 
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - lastBtn).count() >= 700) {
-            lastBtn = now;
-            ScanButtons();
-            DisableButtonsFromList();
+        // اسکن دکمه‌ها هر 2 ثانیه (فقط اگه هنوز پیدا نکردیم)
+        if (!g_buttonsReady) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - lastBtn).count() >= 2000) {
+                lastBtn = now;
+                ScanButtonsOnce();
+                if (g_buttonsReady) DisableButtonsFromList();
+            }
         }
     }
-
-    BNM::DetachIl2Cpp();
 }
 
+// ═══════════════════════════════════════════════════════
 void InstallGameHooks() {
     L("=== InstallGameHooks ===");
 
