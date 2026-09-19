@@ -13,6 +13,7 @@ extern "C" {
 #include "BNM/Utils.hpp"
 
 #include "Globals.h"
+#include "JavaBridge.h"
 #include "ModCore.h"
 
 #define LOG_TAG "LACMod"
