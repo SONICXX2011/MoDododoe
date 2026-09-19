@@ -148,7 +148,7 @@ static void DoGetAllObjects() {
 }
 
 // ═══════════════════════════════════════════════════════
-// UNITYACTION DELEGATE
+// UNITYACTION DELEGATE (با ctor واقعی)
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
     if (!method.IsValid()) {
@@ -156,27 +156,75 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
         return nullptr;
     }
 
-    BNM::DelegateBase* result = nullptr;
+    // ─── UnityAction class ───
+    auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
+    if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
 
+    BNM::Class uaCls("UnityEngine.Events", "UnityAction", imgCore);
+    if (!uaCls.IsValid()) {
+        L("[DELEGATE] UnityAction not found");
+        return nullptr;
+    }
+
+    // ─── لاگ ctorها ───
+    auto methods = uaCls.GetMethods();
+    int ctors = 0;
+    for (auto& mm : methods) {
+        auto* info = mm.GetInfo();
+        if (!info || !info->name) continue;
+        if (std::string(info->name) != ".ctor") continue;
+        L("[DELEGATE] UnityAction.ctor params=%d", (int)info->parameters_count);
+        ctors++;
+        if (ctors > 5) break;
+    }
+
+    // ─── ctor(object, IntPtr) ───
+    auto ctor = uaCls.GetMethod(".ctor", 2);
+    if (!ctor.IsValid()) {
+        L("[DELEGATE] .ctor(2) not found");
+        return nullptr;
+    }
+
+    // ─── instance ───
+    auto* delegateObj = uaCls.CreateNewInstance();
+    if (!delegateObj) {
+        L("[DELEGATE] CreateNewInstance failed");
+        return nullptr;
+    }
+
+    // ─── fn pointer ───
+    void* fnPtr = (void*)method.GetInfo()->methodPointer;
+    if (!fnPtr) {
+        L("[DELEGATE] fnPtr null for %s", method.str().c_str());
+        return nullptr;
+    }
+
+    L("[DELEGATE] fnPtr=%p for %s", fnPtr, method.str().c_str());
+
+    // ─── ctor(null, fnPtr) ───
+    bool ok = false;
     auto ex = BNM::TryInvoke([&]() {
-        BNM::DelegateBase tmp;
-        result = tmp.Create(method);
+        ctor[delegateObj].cast<void>()(
+            (BNM::IL2CPP::Il2CppObject*)nullptr,
+            fnPtr
+        );
+        ok = true;
     });
 
     if (ex.IsValid()) {
-        L("[DELEGATE] ex: %s: %s",
+        L("[DELEGATE] ctor ex: %s: %s",
           ex.ClassName().c_str(), ex.Message().c_str());
         return nullptr;
     }
 
-    if (!result) {
-        L("[DELEGATE] Create returned null");
+    if (!ok) {
+        L("[DELEGATE] ctor failed silently");
         return nullptr;
     }
 
     L("[DELEGATE] created %p for %s",
-      (void*)result, method.str().c_str());
-    return (BNM::IL2CPP::Il2CppObject*)result;
+      (void*)delegateObj, method.str().c_str());
+    return delegateObj;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -197,7 +245,7 @@ static void InstallButtonListeners() {
 
     if (!cls_Button.IsValid()) { L("[LISTENERS] Button invalid"); return; }
 
-    // STAGE-1: گرفتن آرایه
+    // STAGE-1
     auto buttons = GameApi::GetAllInstances(cls_Button);
     L("[LISTENERS] STAGE-1: got %zu objects", buttons.size());
     if (buttons.empty()) { L("[LISTENERS] empty"); return; }
@@ -211,7 +259,7 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-2: done");
 
-    // STAGE-3: چک ClickHandlers
+    // STAGE-3
     auto handlerCls = BNM::Class("MyModMenu", "ClickHandlers");
     if (!handlerCls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
 
@@ -224,7 +272,7 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-3: methods ok");
 
-    // STAGE-4: ساخت delegateها
+    // STAGE-4
     auto* charDel = CreateUnityAction(charMethod);
     auto* backDel = CreateUnityAction(backMethod);
     auto* exitDel = CreateUnityAction(exitMethod);
@@ -235,7 +283,7 @@ static void InstallButtonListeners() {
     }
     L("[LISTENERS] STAGE-4: delegates ok");
 
-    // STAGE-5: iterate و bind
+    // STAGE-5: bind
     int bound = 0;
     for (size_t i = 0; i < buttons.size(); i++) {
         auto* btn = buttons[i];
@@ -332,7 +380,6 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     if (orig_Update) ((void(*)(void*,void*))orig_Update)(self, methodInfo);
     auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
 
-    // نصب listenerها روی main thread (یک بار)
     if (!g_listenersInstalled.load()) {
         g_listenersInstalled.store(true);
         L("[Update] installing listeners on main thread...");
