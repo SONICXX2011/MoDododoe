@@ -148,7 +148,7 @@ static void DoGetAllObjects() {
 }
 
 // ═══════════════════════════════════════════════════════
-// UNITYACTION DELEGATE — با target غیر-null
+// UNITYACTION DELEGATE
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
     if (!method.IsValid()) {
@@ -185,19 +185,17 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
 
     L("[DELEGATE] fnPtr=%p for %s", fnPtr, method.str().c_str());
 
-    // ─── نکته مهم: target غیر-null پاس می‌دیم تا چک .NET رد بشه ───
     bool ok = false;
     auto ex = BNM::TryInvoke([&]() {
         ctor[delegateObj].cast<void>()(
-            delegateObj,   // ← target = خود delegate
+            delegateObj,
             fnPtr
         );
         ok = true;
     });
 
     if (ex.IsValid()) {
-        L("[DELEGATE] ctor ex: %s",
-          ex.Message().c_str());
+        L("[DELEGATE] ctor ex: %s", ex.Message().c_str());
         return nullptr;
     }
 
@@ -218,7 +216,7 @@ static const std::vector<std::string> CHARACTER_NAMES = {
     "Character", "CHARACTER", "CharacterButton", "CharSelect", "CharSelectButton"
 };
 static const std::vector<std::string> BACKMENU_NAMES = {
-    "BackMenu", "Back Menu", "MenuBack", "Back"
+    "BackMenu", "Back Menu", "MenuBack"
 };
 static const std::vector<std::string> EXIT_NAMES = {
     "Exit", "ExitButton", "Quit", "Leave"
@@ -280,6 +278,7 @@ static void InstallButtonListeners() {
 
         L("[LISTENERS] STAGE-5: trying %s -> %s", name.c_str(), role);
 
+        // ─── get_onClick ───
         BNM::IL2CPP::Il2CppObject* onClick = nullptr;
         auto ex1 = BNM::TryInvoke([&]() {
             onClick = BNM::Class(btn)
@@ -287,11 +286,21 @@ static void InstallButtonListeners() {
                 .cast<BNM::IL2CPP::Il2CppObject*>()
                 [btn]();
         });
-        if (ex1.IsValid() || !onClick) {
-            L("[LISTENERS] STAGE-5: %s onClick failed", name.c_str());
+
+        if (ex1.IsValid()) {
+            L("[LISTENERS] STAGE-5: %s get_onClick ex: %s",
+              name.c_str(), ex1.Message().c_str());
             continue;
         }
 
+        if (!onClick) {
+            L("[LISTENERS] STAGE-5: %s onClick NULL", name.c_str());
+            continue;
+        }
+
+        L("[LISTENERS] STAGE-5: %s onClick=%p", name.c_str(), (void*)onClick);
+
+        // ─── AddListener ───
         bool addOk = false;
         auto ex2 = BNM::TryInvoke([&]() {
             BNM::Class(onClick)
@@ -300,7 +309,14 @@ static void InstallButtonListeners() {
                 [onClick](target);
             addOk = true;
         });
-        if (ex2.IsValid() || !addOk) {
+
+        if (ex2.IsValid()) {
+            L("[LISTENERS] STAGE-5: %s AddListener ex: %s",
+              name.c_str(), ex2.Message().c_str());
+            continue;
+        }
+
+        if (!addOk) {
             L("[LISTENERS] STAGE-5: %s AddListener failed", name.c_str());
             continue;
         }
