@@ -33,7 +33,7 @@ static void L(const char* fmt, ...) {
 }
 
 // ═══════════════════════════════════════════════════════
-// GLOBAL CLASS CACHE
+// CLASS CACHE
 // ═══════════════════════════════════════════════════════
 static BNM::Class cls_GtaMenu;
 static BNM::Class cls_NetworkManager;
@@ -41,9 +41,10 @@ static BNM::Class cls_NetworkClient;
 static BNM::Class cls_CustomNetworkManager;
 static BNM::Class cls_Button;
 static BNM::Class cls_Uri;
+static BNM::Class cls_Resources;
 
 // ═══════════════════════════════════════════════════════
-// FLAGS (JNI thread → Update hook main thread)
+// FLAGS
 // ═══════════════════════════════════════════════════════
 static std::atomic<bool> g_requestConnect{false};
 static std::atomic<bool> g_requestDisable{false};
@@ -51,16 +52,13 @@ static std::atomic<bool> g_hookInstalled{false};
 static std::atomic<bool> g_running{false};
 static std::thread       g_retryThread;
 
-// ═══════════════════════════════════════════════════════
-// STATE (main thread only)
-// ═══════════════════════════════════════════════════════
 static int   g_lastMenu = -1;
 static bool  g_lastNetworkActive = false;
 static int   g_frameCounter = 0;
 static void* orig_Update = nullptr;
 
 // ═══════════════════════════════════════════════════════
-// MAIN-THREAD HELPERS
+// HELPERS
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* GetGtaMenu() {
     if (!cls_GtaMenu.IsValid()) return nullptr;
@@ -93,9 +91,27 @@ static bool ReadNetworkActive() {
     return false;
 }
 
-// ═══════════════════════════════════════════════════════
-// DISABLE BUTTONS
-// ═══════════════════════════════════════════════════════
+static std::string ReadMonoString(BNM::Structures::Mono::String* s) {
+    if (!s) return "";
+    try { return s->str(); } catch (...) { return ""; }
+}
+
+static std::string GetName(BNM::IL2CPP::Il2CppObject* obj) {
+    if (!obj) return "";
+    try {
+        auto* go = BNM::Class(obj)
+            .GetMethod("get_gameObject", 0)
+            .cast<BNM::IL2CPP::Il2CppObject*>()
+            .Call(obj);
+        if (!go) return "";
+        auto* n = BNM::Class(go)
+            .GetMethod("get_name", 0)
+            .cast<BNM::Structures::Mono::String*>()
+            .Call(go);
+        return ReadMonoString(n);
+    } catch (...) { return ""; }
+}
+
 static bool IsTargetName(const std::string& name) {
     std::string n;
     for (char c : name) {
@@ -105,71 +121,95 @@ static bool IsTargetName(const std::string& name) {
     return n == "LACEDITOR" || n == "COMMUNITY" || n == "DOCUMENT";
 }
 
-static void ProcessButtonArray(BNM::IL2CPP::Il2CppObject* gta, const char* fieldName) {
-    auto fld = cls_GtaMenu.GetField(fieldName);
-    if (!fld.IsValid()) {
-        L("[DIS] field %s missing", fieldName);
+// ═══════════════════════════════════════════════════════
+// DISABLE — دقیقاً معادل Il2Cpp.gc.choose(Button) در TS
+// با Resources.FindObjectsOfTypeAll
+// ═══════════════════════════════════════════════════════
+static void DisableAllButtons() {
+    L("[DIS] === START (FindObjectsOfTypeAll) ===");
+
+    if (!cls_Resources.IsValid()) {
+        L("[DIS] Resources class invalid");
+        return;
+    }
+    if (!cls_Button.IsValid()) {
+        L("[DIS] Button class invalid");
         return;
     }
 
-    auto* arr = fld
-        .cast<BNM::Structures::Mono::Array<BNM::IL2CPP::Il2CppObject*>*>()
-        [gta].Get();
+    auto m = cls_Resources.GetMethod("FindObjectsOfTypeAll", 1);
+    if (!m.IsValid()) {
+        L("[DIS] FindObjectsOfTypeAll not found");
+        return;
+    }
 
-    if (!arr) { L("[DIS] %s array NULL", fieldName); return; }
+    // Button class -> System.Type
+    auto* buttonType = cls_Button.GetMonoType();
+    if (!buttonType) {
+        L("[DIS] buttonType NULL");
+        return;
+    }
+    L("[DIS] buttonType=%p", (void*)buttonType);
+
+    auto* arr = m
+        .cast<BNM::Structures::Mono::Array<BNM::IL2CPP::Il2CppObject*>*>()
+        .Call(nullptr, (BNM::IL2CPP::Il2CppObject*)buttonType);
+
+    if (!arr) {
+        L("[DIS] returned NULL array");
+        return;
+    }
 
     auto cap = arr->GetCapacity();
-    int found = 0, disabled = 0;
+    L("[DIS] found %zu Button objects total", (size_t)cap);
 
+    int disabled = 0;
     for (size_t i = 0; i < cap; i++) {
         auto* btn = *arr->At(i);
         if (!btn) continue;
-        found++;
 
-        std::string name;
-        try {
-            auto* go = BNM::Class(btn)
-                .GetMethod("get_gameObject", 0)
-                .cast<BNM::IL2CPP::Il2CppObject*>()
-                .Call(btn);
-            if (go) {
-                auto* n = BNM::Class(go)
-                    .GetMethod("get_name", 0)
-                    .cast<BNM::Structures::Mono::String*>()
-                    .Call(go);
-                if (n) name = n->str();
-            }
-        } catch (...) {}
+        std::string name = GetName(btn);
+
+        // لاگ همه‌ی اسم‌ها
+        if (!name.empty()) {
+            L("[DIS]   [%zu] '%s'", i, name.c_str());
+        }
 
         if (IsTargetName(name)) {
             try {
+                bool oldVal = BNM::Class(btn)
+                    .GetMethod("get_interactable", 0)
+                    .cast<bool>()
+                    .Call(btn);
+
                 BNM::Class(btn)
                     .GetMethod("set_interactable", 1)
                     .cast<void>()
                     .Call(btn, false);
+
+                bool newVal = BNM::Class(btn)
+                    .GetMethod("get_interactable", 0)
+                    .cast<bool>()
+                    .Call(btn);
+
+                L("[DIS]   >>> '%s' interactable %d -> %d", 
+                  name.c_str(), (int)oldVal, (int)newVal);
                 disabled++;
-                L("[DIS] disabled: %s", name.c_str());
-            } catch (...) {}
+            } catch (const std::exception& e) {
+                L("[DIS]   set_interactable ex: %s", e.what());
+            } catch (...) {
+                L("[DIS]   set_interactable unknown ex");
+            }
         }
     }
-    L("[DIS] %s: %d buttons, %d disabled", fieldName, found, disabled);
-}
-
-static void DoDisableButtons() {
-    auto* gta = GetGtaMenu();
-    if (!gta) { L("[DIS] GtaMenu NULL"); return; }
-
-    ProcessButtonArray(gta, "menuButtons");
-    ProcessButtonArray(gta, "settingsButtons");
-    ProcessButtonArray(gta, "communityButtons");
-    ProcessButtonArray(gta, "mapsButton");
+    L("[DIS] === END: disabled %d ===", disabled);
 }
 
 // ═══════════════════════════════════════════════════════
-// DIRECT CONNECT
+// DIRECT CONNECT — با لاگ کامل
 // ═══════════════════════════════════════════════════════
 static bool DoDirectConnect() {
-    L("[DC] start");
+    L("[DC] ========== START ==========");
 
     if (!cls_NetworkManager.IsValid()) {
         L("[DC] NetworkManager invalid"); return false;
@@ -183,41 +223,103 @@ static bool DoDirectConnect() {
     if (!mgr) { L("[DC] singleton NULL"); return false; }
     L("[DC] singleton=%p", (void*)mgr);
 
+    // ─── transport ───
+    try {
+        auto trField = cls_NetworkManager.GetField("transport");
+        if (trField.IsValid()) {
+            auto* tr = trField
+                .cast<BNM::IL2CPP::Il2CppObject*>()
+                [mgr].Get();
+            L("[DC] transport=%p", (void*)tr);
+            if (tr) {
+                L("[DC] transport class=%s", BNM::Class(tr).str().c_str());
+            } else {
+                L("[DC] !!! transport is NULL — main issue !!!");
+            }
+        } else {
+            L("[DC] transport field NOT FOUND");
+        }
+    } catch (...) { L("[DC] transport read ex"); }
+
+    // ─── networkAddress ───
+    try {
+        auto fld = cls_NetworkManager.GetField("networkAddress")
+            .cast<BNM::Structures::Mono::String*>();
+        if (fld.IsValid()) {
+            auto* addr = fld[mgr].Get();
+            L("[DC] networkAddress='%s'", ReadMonoString(addr).c_str());
+        }
+    } catch (...) {}
+
     if (!cls_Uri.IsValid()) { L("[DC] Uri invalid"); return false; }
 
     char uriStr[64];
     snprintf(uriStr, sizeof(uriStr), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
 
+    // ─── ساخت Uri ───
+    L("[DC] creating Uri: %s", uriStr);
     auto* uriObj = cls_Uri.CreateNewObjectParameters(BNM::CreateMonoString(uriStr));
-    if (!uriObj) { L("[DC] Uri alloc failed"); return false; }
-    L("[DC] uri=%s", uriStr);
+    if (!uriObj) { L("[DC] Uri alloc FAILED"); return false; }
+    L("[DC] uriObj=%p", (void*)uriObj);
 
+    // ─── بخونیم ببینیم Uri درست ساخته شد ───
+    try {
+        auto* abs = BNM::Class(uriObj)
+            .GetMethod("get_AbsoluteUri", 0)
+            .cast<BNM::Structures::Mono::String*>()
+            .Call(uriObj);
+        std::string absStr = ReadMonoString(abs);
+        L("[DC] uri.AbsoluteUri='%s'", absStr.c_str());
+        if (absStr.empty()) {
+            L("[DC] !!! Uri is EMPTY — ctor wrong !!!");
+        }
+    } catch (...) {
+        L("[DC] get_AbsoluteUri failed");
+    }
+
+    // ─── resolve StartClient(Uri) ───
     BNM::CompileTimeClass uriType =
         BNM::CompileTimeClassBuilder("System", "Uri").Build();
     auto m = cls_NetworkManager.GetMethod("StartClient", {uriType});
 
     if (!m.IsValid()) {
-        L("[DC] fallback by name+count");
-        auto methods = cls_NetworkManager.GetMethods();
-        for (auto& mm : methods) {
-            auto* info = mm.GetInfo();
-            if (!info || !info->name) continue;
-            if (std::string(info->name) != "StartClient") continue;
-            if (info->parameters_count != 1) continue;
-            m = mm; break;
-        }
+        L("[DC] type-based not found, fallback count=1");
+        m = cls_NetworkManager.GetMethod("StartClient", 1);
     }
 
     if (!m.IsValid()) { L("[DC] StartClient NOT FOUND"); return false; }
 
-    L("[DC] calling StartClient(Uri)");
+    L("[DC] resolved: %s", m.str().c_str());
+
+    // ─── CALL ───
+    L("[DC] >>> CALLING");
     m.cast<void>().Call(mgr, uriObj);
-    L("[DC] StartClient CALLED");
+    L("[DC] <<< RETURNED");
+
+    // ─── wait & check ───
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    bool netActive = ReadNetworkActive();
+    L("[DC] after 500ms: netActive=%d", (int)netActive);
+
+    try {
+        bool conn = cls_NetworkClient.GetMethod("get_isConnected", 0)
+            .cast<bool>().Call();
+        L("[DC] isConnected=%d", (int)conn);
+    } catch (...) {}
+
+    try {
+        bool act = cls_NetworkClient.GetMethod("get_active", 0)
+            .cast<bool>().Call();
+        L("[DC] active=%d", (int)act);
+    } catch (...) {}
+
+    L("[DC] ========== END ==========");
     return true;
 }
 
 // ═══════════════════════════════════════════════════════
-// HOOK: GtaMenuControl.Update()  ← main thread every frame
+// UPDATE HOOK
 // ═══════════════════════════════════════════════════════
 static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     if (orig_Update) {
@@ -226,27 +328,23 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
 
     auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
 
-    // ─── Connect request from JNI ───
     if (g_requestConnect.exchange(false)) {
         L("[Update] connect requested");
         DoDirectConnect();
     }
 
-    // ─── Disable request from JNI ───
     if (g_requestDisable.exchange(false)) {
         L("[Update] disable requested");
-        DoDisableButtons();
+        DisableAllButtons();
     }
 
-    // ─── Auto-disable every ~2s in Main menu ───
     g_frameCounter++;
     if (g_frameCounter >= 120) {
         g_frameCounter = 0;
         int menu = ReadCurrentMenu(selfObj);
-        if (menu == 0) DoDisableButtons();
+        if (menu == 0) DisableAllButtons();
     }
 
-    // ─── State logging ───
     int menu = ReadCurrentMenu(selfObj);
     bool network = ReadNetworkActive();
 
@@ -263,7 +361,7 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
 }
 
 // ═══════════════════════════════════════════════════════
-// HOOK: OnClientError (InvokeHook — no shadowhook)
+// OnClientError HOOK
 // ═══════════════════════════════════════════════════════
 static void* orig_OnClientError = nullptr;
 
@@ -282,31 +380,25 @@ static void Hook_OnClientError(void* self, int err, void* message) {
 
 static void InstallOnClientErrorHook() {
     if (!cls_CustomNetworkManager.IsValid()) { L("[Hook] CNM invalid"); return; }
-
     auto m = cls_CustomNetworkManager.GetMethod("OnClientError", 2);
-    if (!m.IsValid()) { L("[Hook] OnClientError(2) not found"); return; }
-
+    if (!m.IsValid()) { L("[Hook] not found"); return; }
     auto* info = m.GetInfo();
-    L("[Hook] ptr=%p vptr=%p",
+    L("[Hook] OnClientError ptr=%p vptr=%p",
       (void*)info->methodPointer, (void*)info->virtualMethodPointer);
-
     bool ok = BNM::InvokeHook(m, (void*)Hook_OnClientError, orig_OnClientError);
     L("[Hook] InvokeHook=%d orig=%p", (int)ok, orig_OnClientError);
 }
 
 // ═══════════════════════════════════════════════════════
-// HOOK: Update install
+// INSTALL Update
 // ═══════════════════════════════════════════════════════
 static void InstallUpdateHook() {
     if (g_hookInstalled.load()) return;
     if (!cls_GtaMenu.IsValid()) { L("[Update] GtaMenu invalid"); return; }
 
     auto m = cls_GtaMenu.GetMethod("Update", 0);
-    if (!m.IsValid()) {
-        L("[Update] Update not found, trying LateUpdate");
-        m = cls_GtaMenu.GetMethod("LateUpdate", 0);
-    }
-    if (!m.IsValid()) { L("[Update] no Update/LateUpdate!"); return; }
+    if (!m.IsValid()) m = cls_GtaMenu.GetMethod("LateUpdate", 0);
+    if (!m.IsValid()) { L("[Update] no Update!"); return; }
 
     bool ok = BNM::InvokeHook(m, (void*)Hook_GtaMenuUpdate, orig_Update);
     L("[Update] InvokeHook=%d orig=%p", (int)ok, orig_Update);
@@ -322,12 +414,12 @@ static void ResolveUriClass() {
         std::string_view s = cls_Uri.GetImage().str();
         L("Uri in: %.*s", (int)s.size(), s.data());
     } else {
-        L("!!! Uri NOT found in ANY assembly");
+        L("!!! Uri NOT found");
     }
 }
 
 // ═══════════════════════════════════════════════════════
-// INSTALL CLASSES
+// CLASSES
 // ═══════════════════════════════════════════════════════
 static void ResolveClasses() {
     auto imgAsm    = BNM::Image("Assembly-CSharp.dll");
@@ -339,23 +431,28 @@ static void ResolveClasses() {
     auto imgUI     = BNM::Image("UnityEngine.UI.dll");
     if (!imgUI.IsValid()) imgUI = BNM::Image("UnityEngine.UI");
 
+    auto imgCore   = BNM::Image("UnityEngine.CoreModule.dll");
+    if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
+
     cls_GtaMenu              = BNM::Class("", "GtaMenuControl", imgAsm);
     cls_NetworkManager       = BNM::Class("Mirror", "NetworkManager", imgMirror);
     cls_NetworkClient        = BNM::Class("Mirror", "NetworkClient", imgMirror);
     cls_CustomNetworkManager = BNM::Class("", "CustomNetworkManager", imgAsm);
     cls_Button               = BNM::Class("UnityEngine.UI", "Button", imgUI);
+    cls_Resources            = BNM::Class("UnityEngine", "Resources", imgCore);
 }
 
 void InstallGameHooks() {
     L("=== InstallGameHooks ===");
     ResolveClasses();
 
-    L("Gta=%d NM=%d NC=%d CNM=%d Btn=%d",
+    L("Gta=%d NM=%d NC=%d CNM=%d Btn=%d Res=%d",
       (int)cls_GtaMenu.IsValid(),
       (int)cls_NetworkManager.IsValid(),
       (int)cls_NetworkClient.IsValid(),
       (int)cls_CustomNetworkManager.IsValid(),
-      (int)cls_Button.IsValid());
+      (int)cls_Button.IsValid(),
+      (int)cls_Resources.IsValid());
 
     ResolveUriClass();
     InstallOnClientErrorHook();
@@ -365,52 +462,41 @@ void InstallGameHooks() {
 }
 
 // ═══════════════════════════════════════════════════════
-// JNI-thread entry points (only set flags)
+// JNI entry
 // ═══════════════════════════════════════════════════════
 void TriggerStartGame() {
-    L("[JNI] queue connect request");
+    L("[JNI] queue connect");
     g_requestConnect.store(true);
 }
 
 void DisableModButtons() {
-    L("[JNI] queue disable request");
+    L("[JNI] queue disable");
     g_requestDisable.store(true);
 }
 
-void DumpStartClientInfo() {
-    L("[JNI] dump requested");
-}
+void DumpStartClientInfo() { L("[JNI] dump"); }
 
 // ═══════════════════════════════════════════════════════
-// START (with retry thread for Update hook)
+// START
 // ═══════════════════════════════════════════════════════
 void StartStateLoop() {
     if (g_running.exchange(true)) return;
-
     g_retryThread = std::thread([]() {
-        // Initial attempt
         InstallGameHooks();
-
-        // Retry if Update hook failed
         int attempt = 0;
         while (g_running.load() && !g_hookInstalled.load() && attempt < 60) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             attempt++;
-            L("[Retry] Update hook attempt %d", attempt);
+            L("[Retry] attempt %d", attempt);
             ResolveClasses();
             InstallUpdateHook();
         }
-
-        if (g_hookInstalled.load()) {
-            L("[Retry] Update hook installed OK");
-        } else {
-            L("[Retry] FAILED to install Update hook");
-        }
+        if (g_hookInstalled.load()) L("[Retry] Update hook OK");
+        else L("[Retry] FAILED");
     });
 }
 
 void StopStateLoop() {
     g_running.store(false);
     if (g_retryThread.joinable()) g_retryThread.join();
-    L("StateLoop stopped");
 }
