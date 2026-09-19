@@ -4,13 +4,13 @@ plugins {
 
 android {
     namespace 'com.myapp.modmenu'
-    compileSdk 36
+    compileSdk 34
     ndkVersion "26.1.10909125"
 
     defaultConfig {
         applicationId "com.myapp.modmenu"
-        minSdk 21
-        targetSdk 36
+        minSdk 24
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 
@@ -37,6 +37,12 @@ android {
         release {
             minifyEnabled false
             signingConfig signingConfigs.debug
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 

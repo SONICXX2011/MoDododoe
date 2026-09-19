@@ -4,9 +4,9 @@ project(mymod C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ═══════════════════════════════════════════
-# ShadowHook — سورس‌های مشترک
-# ═══════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+# ShadowHook
+# ═══════════════════════════════════════════════════════
 set(SH_COMMON_SRC
     shadowhook/shadowhook.c
     shadowhook/sh_elf.c
@@ -50,14 +50,9 @@ elseif("${ANDROID_ABI}" STREQUAL "armeabi-v7a")
         shadowhook/arch/arm/sh_txx.c
     )
     set(SH_ARCH_INC shadowhook/arch/arm)
-else()
-    message(FATAL_ERROR "معماری پشتیبانی نمیشه: ${ANDROID_ABI}")
 endif()
 
-add_library(shadowhook STATIC
-    ${SH_COMMON_SRC}
-    ${SH_ARCH_SRC}
-)
+add_library(shadowhook STATIC ${SH_COMMON_SRC} ${SH_ARCH_SRC})
 
 target_include_directories(shadowhook PUBLIC
     shadowhook
@@ -69,11 +64,15 @@ target_include_directories(shadowhook PUBLIC
     shadowhook/third_party/lss
 )
 
-target_compile_options(shadowhook PRIVATE -O2 -fvisibility=hidden -fno-stack-protector)
+target_compile_options(shadowhook PRIVATE
+    -O2
+    -fvisibility=hidden
+    -fno-stack-protector
+)
 
-# ═══════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 # BNM
-# ═══════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 set(BNM_SRC
     BNM/src/Class.cpp
     BNM/src/ClassesManagement.cpp
@@ -94,51 +93,36 @@ set(BNM_SRC
     BNM/src/Utils.cpp
 )
 
-# ═══════════════════════════════════════════
-# KittyMemory
-# ═══════════════════════════════════════════
-set(KM_SRC
-    kittymemory/KittyMemory.cpp
-    kittymemory/KittyUtils.cpp
-    kittymemory/KittyScanner.cpp
-    kittymemory/KittyPtrValidator.cpp
-    kittymemory/KittyIOFile.cpp
-    kittymemory/MemoryBackup.cpp
-    kittymemory/MemoryPatch.cpp
-)
-
-# ═══════════════════════════════════════════
-# ImGui
-# ═══════════════════════════════════════════
-set(IG_SRC
-    imgui/imgui.cpp
-    imgui/imgui_draw.cpp
-    imgui/imgui_widgets.cpp
-    imgui/imgui_tables.cpp
-    imgui/backends/imgui_impl_android.cpp
-    imgui/backends/imgui_impl_opengl3.cpp
+# ═══════════════════════════════════════════════════════
+# Mod sources
+# ═══════════════════════════════════════════════════════
+set(MOD_SRC
+    main.cpp
+    JavaBridge.cpp
+    ModCore.cpp
 )
 
 add_library(mymod SHARED
-    main.cpp
+    ${MOD_SRC}
     ${BNM_SRC}
-    ${KM_SRC}
-    ${IG_SRC}
 )
 
 target_include_directories(mymod PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     BNM/include
     BNM/external/include
     BNM/external
     BNM/external/utf8
     BNM/src/private
-    kittymemory
-    imgui
-    imgui/backends
     shadowhook/include
 )
 
-target_compile_options(mymod PRIVATE -fexceptions -frtti -O2 -fvisibility=hidden)
+target_compile_options(mymod PRIVATE
+    -fexceptions
+    -frtti
+    -O2
+    -fvisibility=hidden
+)
 
 set_source_files_properties(${BNM_SRC} PROPERTIES
     COMPILE_OPTIONS "-include;cmath"
@@ -148,7 +132,5 @@ target_link_libraries(mymod
     shadowhook
     log
     android
-    EGL
-    GLESv3
     dl
 )
