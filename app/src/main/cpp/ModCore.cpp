@@ -35,6 +35,12 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
+// ─── helper که جا افتاده بود ───
+static std::string ReadMonoString(BNM::Structures::Mono::String* s) {
+    if (!s) return "";
+    try { return s->str(); } catch (...) { return ""; }
+}
+
 // ═══════════════════════════════════════════════════════
 // CLASS CACHE
 // ═══════════════════════════════════════════════════════
@@ -45,7 +51,7 @@ static BNM::Class cls_CustomNetworkManager;
 static BNM::Class cls_Uri;
 
 // ═══════════════════════════════════════════════════════
-// CLICK HANDLERS — کلاس سفارشی برای دیلیگیت‌ها
+// CLICK HANDLERS (custom class)
 // ═══════════════════════════════════════════════════════
 struct ClickHandlers : public BNM::IL2CPP::Il2CppObject {
     BNM_CustomClass(ClickHandlers,
@@ -54,28 +60,25 @@ struct ClickHandlers : public BNM::IL2CPP::Il2CppObject {
         BNM::CompileTimeClass()
     );
 
-    BNM_CustomMethod(OnCharacterClick, true, BNM::Defaults::Get<void>(), "OnCharacterClick");
-    BNM_CustomMethod(OnBackMenuClick, true, BNM::Defaults::Get<void>(), "OnBackMenuClick");
-    BNM_CustomMethod(OnExitClick, true, BNM::Defaults::Get<void>(), "OnExitClick");
-
     static void OnCharacterClick();
     static void OnBackMenuClick();
     static void OnExitClick();
+
+    BNM_CustomMethod(OnCharacterClick, true, BNM::Defaults::Get<void>(), "OnCharacterClick");
+    BNM_CustomMethod(OnBackMenuClick,  true, BNM::Defaults::Get<void>(), "OnBackMenuClick");
+    BNM_CustomMethod(OnExitClick,      true, BNM::Defaults::Get<void>(), "OnExitClick");
 };
 
-// تعریف متدها
 void ClickHandlers::OnCharacterClick() {
-    LOGI("[CLICK] Character clicked!");
+    LOGI("[CLICK] Character");
     JB_OnCharacterEvent();
 }
-
 void ClickHandlers::OnBackMenuClick() {
-    LOGI("[CLICK] BackMenu clicked!");
+    LOGI("[CLICK] BackMenu");
     JB_OnBackMenuEvent();
 }
-
 void ClickHandlers::OnExitClick() {
-    LOGI("[CLICK] Exit clicked!");
+    LOGI("[CLICK] Exit");
     JB_OnExitEvent();
 }
 
@@ -124,52 +127,35 @@ static bool ReadNetworkActive() {
 }
 
 // ═══════════════════════════════════════════════════════
-// CREATE UNITYACTION DELEGATE
+// UNITYACTION DELEGATE
 // ═══════════════════════════════════════════════════════
 static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
     try {
-        // گرفتن کلاس UnityAction
         auto imgCore = BNM::Image("UnityEngine.CoreModule.dll");
         if (!imgCore.IsValid()) imgCore = BNM::Image("UnityEngine.CoreModule");
 
         BNM::Class uaCls("UnityEngine.Events", "UnityAction", imgCore);
         if (!uaCls.IsValid()) {
-            L("[DELEGATE] UnityAction class not found");
+            L("[DELEGATE] UnityAction not found");
             return nullptr;
         }
 
-        // ساخت instance
         auto* action = uaCls.CreateNewInstance();
-        if (!action) {
-            L("[DELEGATE] CreateNewInstance failed");
-            return nullptr;
-        }
+        if (!action) return nullptr;
 
-        // cast به MulticastDelegateBase و اضافه کردن متد
-        auto* mcDelegate = (BNM::MulticastDelegateBase*)action;
-        auto* delegate = mcDelegate->Add(method);
-
-        if (!delegate) {
-            L("[DELEGATE] Add failed");
-            return nullptr;
-        }
+        auto* mc = (BNM::MulticastDelegateBase*)action;
+        auto* del = mc->Add(method);
+        if (!del) return nullptr;
 
         return (BNM::IL2CPP::Il2CppObject*)action;
-    } catch (const std::exception& e) {
-        L("[DELEGATE] ex: %s", e.what());
-        return nullptr;
-    } catch (...) {
-        L("[DELEGATE] unknown ex");
-        return nullptr;
-    }
+    } catch (...) { return nullptr; }
 }
 
 // ═══════════════════════════════════════════════════════
 // INSTALL BUTTON LISTENERS
 // ═══════════════════════════════════════════════════════
 static const std::vector<std::string> CHARACTER_NAMES = {
-    "Character", "CHARACTER", "CharacterButton",
-    "CharSelect", "CharSelectButton"
+    "Character", "CHARACTER", "CharacterButton", "CharSelect", "CharSelectButton"
 };
 static const std::vector<std::string> BACKMENU_NAMES = {
     "BackMenu", "Back Menu", "MenuBack", "Back"
@@ -181,37 +167,26 @@ static const std::vector<std::string> EXIT_NAMES = {
 static void InstallButtonListeners() {
     L("[LISTENERS] === START ===");
 
-    // گرفتن همه‌ی دکمه‌ها
     auto buttons = GameApi::GetAllObjects("UnityEngine.UI.Button");
-    if (buttons.empty()) {
-        L("[LISTENERS] no buttons found");
-        return;
-    }
+    if (buttons.empty()) { L("[LISTENERS] no buttons"); return; }
 
-    // گرفتن کلاس ClickHandlers
     auto cls = BNM::Class("MyModMenu", "ClickHandlers");
-    if (!cls.IsValid()) {
-        L("[LISTENERS] ClickHandlers class not found");
-        return;
-    }
+    if (!cls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
 
-    // گرفتن متدها
     auto charMethod = cls.GetMethod("OnCharacterClick", 0);
     auto backMethod = cls.GetMethod("OnBackMenuClick", 0);
     auto exitMethod = cls.GetMethod("OnExitClick", 0);
 
     if (!charMethod.IsValid() || !backMethod.IsValid() || !exitMethod.IsValid()) {
-        L("[LISTENERS] methods not found: %d %d %d",
-          (int)charMethod.IsValid(), (int)backMethod.IsValid(), (int)exitMethod.IsValid());
+        L("[LISTENERS] methods not found");
         return;
     }
 
-    // ساخت delegateها (فقط یک بار)
-    auto* charDelegate = CreateUnityAction(charMethod);
-    auto* backDelegate = CreateUnityAction(backMethod);
-    auto* exitDelegate = CreateUnityAction(exitMethod);
+    auto* charDel = CreateUnityAction(charMethod);
+    auto* backDel = CreateUnityAction(backMethod);
+    auto* exitDel = CreateUnityAction(exitMethod);
 
-    if (!charDelegate || !backDelegate || !exitDelegate) {
+    if (!charDel || !backDel || !exitDel) {
         L("[LISTENERS] delegate creation failed");
         return;
     }
@@ -221,47 +196,30 @@ static void InstallButtonListeners() {
         std::string name = GameApi::GetName(btn);
         if (name.empty()) continue;
 
-        BNM::IL2CPP::Il2CppObject* targetDelegate = nullptr;
+        BNM::IL2CPP::Il2CppObject* target = nullptr;
         const char* role = nullptr;
 
-        if (GameApi::MatchesName(name, CHARACTER_NAMES)) {
-            targetDelegate = charDelegate;
-            role = "Character";
-        } else if (GameApi::MatchesName(name, BACKMENU_NAMES)) {
-            targetDelegate = backDelegate;
-            role = "BackMenu";
-        } else if (GameApi::MatchesName(name, EXIT_NAMES)) {
-            targetDelegate = exitDelegate;
-            role = "Exit";
-        } else {
-            continue;
-        }
+        if (GameApi::MatchesName(name, CHARACTER_NAMES)) { target = charDel; role = "Character"; }
+        else if (GameApi::MatchesName(name, BACKMENU_NAMES)) { target = backDel; role = "BackMenu"; }
+        else if (GameApi::MatchesName(name, EXIT_NAMES)) { target = exitDel; role = "Exit"; }
+        else continue;
 
         try {
-            // گرفتن onClick
             auto* onClick = BNM::Class(btn)
                 .GetMethod("get_onClick", 0)
                 .cast<BNM::IL2CPP::Il2CppObject*>()
                 [btn]();
 
-            if (!onClick) {
-                L("[LISTENERS] %s: onClick NULL", name.c_str());
-                continue;
-            }
+            if (!onClick) continue;
 
-            // AddListener
             BNM::Class(onClick)
                 .GetMethod("AddListener", 1)
                 .cast<void>()
-                [onClick](targetDelegate);
+                [onClick](target);
 
             L("[LISTENERS] %s -> %s", name.c_str(), role);
             bound++;
-        } catch (const std::exception& e) {
-            L("[LISTENERS] %s ex: %s", name.c_str(), e.what());
-        } catch (...) {
-            L("[LISTENERS] %s unknown ex", name.c_str());
-        }
+        } catch (...) {}
     }
 
     L("[LISTENERS] === END: bound %d ===", bound);
@@ -271,37 +229,26 @@ static void InstallButtonListeners() {
 // DIRECT CONNECT
 // ═══════════════════════════════════════════════════════
 static bool DoDirectConnect() {
-    L("[DC] ========== START ==========");
-
-    if (!cls_NetworkManager.IsValid()) { L("[DC] NM invalid"); return false; }
+    L("[DC] === START ===");
+    if (!cls_NetworkManager.IsValid()) return false;
 
     auto* mgr = cls_NetworkManager.GetMethod("get_singleton", 0)
         .cast<BNM::IL2CPP::Il2CppObject*>().Call();
     if (!mgr) { L("[DC] singleton NULL"); return false; }
-    L("[DC] singleton=%p", (void*)mgr);
 
-    if (!cls_Uri.IsValid()) { L("[DC] Uri invalid"); return false; }
+    if (!cls_Uri.IsValid()) return false;
 
     char uriStr[64];
     snprintf(uriStr, sizeof(uriStr), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
 
     auto* uriObj = cls_Uri.CreateNewInstance();
-    if (!uriObj) { L("[DC] alloc failed"); return false; }
+    if (!uriObj) return false;
 
     BNM::CompileTimeClass strType =
         BNM::CompileTimeClassBuilder("System", "String").Build();
     auto ctor = cls_Uri.GetMethod(".ctor", {strType});
-    if (!ctor.IsValid()) { L("[DC] ctor(String) not found"); return false; }
-
+    if (!ctor.IsValid()) return false;
     ctor[uriObj].cast<void>()(BNM::CreateMonoString(uriStr));
-
-    try {
-        auto* abs = BNM::Class(uriObj)
-            .GetMethod("get_AbsoluteUri", 0)
-            .cast<BNM::Structures::Mono::String*>()
-            [uriObj]();
-        L("[DC] uri='%s'", ReadMonoString(abs).c_str());
-    } catch (...) {}
 
     BNM::CompileTimeClass uriType =
         BNM::CompileTimeClassBuilder("System", "Uri").Build();
@@ -314,7 +261,7 @@ static bool DoDirectConnect() {
     L("[DC] <<< RETURNED");
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    L("[DC] after 500ms: netActive=%d", (int)ReadNetworkActive());
+    L("[DC] netActive=%d", (int)ReadNetworkActive());
     return true;
 }
 
@@ -326,20 +273,19 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
 
     if (g_requestConnect.exchange(false)) {
-        L("[Update] connect requested"); DoDirectConnect();
+        L("[Update] connect");
+        DoDirectConnect();
     }
     if (g_requestDisable.exchange(false)) {
-        L("[Update] disable requested");
-        // disable کردن دکمه‌ها
+        L("[Update] disable");
         auto buttons = GameApi::GetAllObjects("UnityEngine.UI.Button");
         int dis = 0;
         for (auto* btn : buttons) {
             std::string name = GameApi::GetName(btn);
-            if (GameApi::MatchesName(name, {"LACEDITOR", "COMMUNITY", "DOCUMENT", "LAN"})) {
+            if (GameApi::MatchesName(name, {"LACEDITOR", "COMMUNITY", "DOCUMENT", "LAN"}))
                 if (GameApi::SetInteractable(btn, false)) dis++;
-            }
         }
-        L("[DIS] disabled %d", dis);
+        L("[DIS] %d", dis);
     }
 
     g_frameCounter++;
@@ -424,8 +370,6 @@ void InstallGameHooks() {
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
-
-    // نصب listenerها
     InstallButtonListeners();
 
     L("=== done ===");
