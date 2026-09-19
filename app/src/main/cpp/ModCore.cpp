@@ -28,7 +28,6 @@ extern "C" {
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// لاگ هم به logcat هم به UI
 static void L(const char* fmt, ...) {
     char buf[512];
     va_list args;
@@ -47,6 +46,7 @@ static BNM::Class cls_Button;
 static BNM::Class cls_Selectable;
 static BNM::Class cls_NetworkManager;
 static BNM::Class cls_NetworkClient;
+static BNM::Class cls_CustomNetworkManager;
 
 // ═══════════════════════════════════════════════════════
 // Buttons
@@ -61,9 +61,6 @@ static std::vector<BtnEntry>     g_buttons;
 static std::unordered_set<void*> g_known;
 static std::unordered_set<void*> g_disabled;
 
-// ═══════════════════════════════════════════════════════
-// Threads
-// ═══════════════════════════════════════════════════════
 static std::atomic<bool> g_running{false};
 static std::thread       g_loopThread;
 
@@ -72,55 +69,36 @@ static std::thread       g_loopThread;
 // ═══════════════════════════════════════════════════════
 static std::string GetGameObjectName(BNM::IL2CPP::Il2CppObject* comp) {
     if (!comp) return "";
-
     try {
-        auto compCls = BNM::Class(
-            "UnityEngine",
-            "Component",
-            BNM::Image("UnityEngine.CoreModule.dll"));
-
-        auto* go = compCls
-            .GetMethod("get_gameObject", 0)
-            .cast<BNM::IL2CPP::Il2CppObject*>()
-            .Call(comp);
-
+        auto compCls = BNM::Class("UnityEngine", "Component",
+                                  BNM::Image("UnityEngine.CoreModule.dll"));
+        auto* go = compCls.GetMethod("get_gameObject", 0)
+                      .cast<BNM::IL2CPP::Il2CppObject*>()
+                      .Call(comp);
         if (!go) return "";
-
-        auto objCls = BNM::Class(
-            "UnityEngine",
-            "Object",
-            BNM::Image("UnityEngine.CoreModule.dll"));
-
-        auto* nm = objCls
-            .GetMethod("get_name", 0)
-            .cast<BNM::Structures::Mono::String*>()
-            .Call(go);
-
+        auto objCls = BNM::Class("UnityEngine", "Object",
+                                 BNM::Image("UnityEngine.CoreModule.dll"));
+        auto* nm = objCls.GetMethod("get_name", 0)
+                       .cast<BNM::Structures::Mono::String*>()
+                       .Call(go);
         if (!nm) return "";
-
         return nm->str();
-    } catch (...) {
-        return "";
-    }
+    } catch (...) { return ""; }
 }
 
 static std::string Normalize(const std::string& s) {
     std::string o;
     for (char c : s) {
-        if (c == ' ' || c == '_' || c == '-' || c == '(' || c == ')') continue;
-        o += (char) ::tolower((unsigned char) c);
+        if (c==' '||c=='_'||c=='-'||c=='('||c==')') continue;
+        o += (char)::tolower((unsigned char)c);
     }
     return o;
 }
 
-static bool NameMatches(
-    const std::string& actual,
-    std::initializer_list<const char*> targets)
-{
+static bool NameMatches(const std::string& actual,
+                        std::initializer_list<const char*> targets) {
     std::string a = Normalize(actual);
-    for (auto* t : targets) {
-        if (a == Normalize(t)) return true;
-    }
+    for (auto* t : targets) if (a == Normalize(t)) return true;
     return false;
 }
 
@@ -134,7 +112,7 @@ static void Hook_Button_Awake(BNM::IL2CPP::Il2CppObject* self) {
     if (orig_Button_Awake) orig_Button_Awake(self);
     if (!self) return;
 
-    void* key = (void*) self;
+    void* key = (void*)self;
     {
         std::lock_guard<std::mutex> lk(g_btnMtx);
         if (g_known.count(key)) return;
@@ -153,17 +131,33 @@ static void Hook_Button_Awake(BNM::IL2CPP::Il2CppObject* self) {
     JB_Log("Btn: " + nm);
 
     if (NameMatches(nm, { "LACEDITOR", "COMMUNITY", "DOCUMENT" })) {
-        if (cls_Button.IsValid()) {
+        L(">>> MATCHED: %s <<<", nm.c_str());
+        
+        if (cls_Selectable.IsValid()) {
             try {
-                cls_Button
-                    .GetMethod("set_interactable", 1)
+                cls_Selectable.GetMethod("set_interactable", 1)
                     .cast<void>()
                     .Call(self, false);
                 std::lock_guard<std::mutex> lk(g_btnMtx);
                 g_disabled.insert(key);
-                L("DISABLED: %s", nm.c_str());
+                L("DISABLED (Selectable): %s", nm.c_str());
+            } catch (const std::exception& e) {
+                L("Selectable fail: %s", e.what());
             } catch (...) {
-                LOGE("disable fail: %s", nm.c_str());
+                L("Selectable fail: unknown");
+            }
+        }
+        
+        if (cls_Button.IsValid()) {
+            try {
+                cls_Button.GetMethod("set_interactable", 1)
+                    .cast<void>()
+                    .Call(self, false);
+                std::lock_guard<std::mutex> lk(g_btnMtx);
+                g_disabled.insert(key);
+                L("DISABLED (Button): %s", nm.c_str());
+            } catch (...) {
+                L("Button disable fail: %s", nm.c_str());
             }
         }
     }
@@ -175,13 +169,10 @@ static void Hook_Button_Awake(BNM::IL2CPP::Il2CppObject* self) {
 static BNM::IL2CPP::Il2CppObject* GetGtaMenu() {
     if (!cls_GtaMenu.IsValid()) return nullptr;
     try {
-        return cls_GtaMenu
-            .GetMethod("get_Instance", 0)
+        return cls_GtaMenu.GetMethod("get_Instance", 0)
             .cast<BNM::IL2CPP::Il2CppObject*>()
             .Call();
-    } catch (...) {
-        return nullptr;
-    }
+    } catch (...) { return nullptr; }
 }
 
 static int GetCurrentMenu() {
@@ -191,105 +182,134 @@ static int GetCurrentMenu() {
         BNM::Field<int> f = cls_GtaMenu.GetField("currentMenu").cast<int>();
         f[ctrl];
         return f.Get();
-    } catch (...) {
-        return -1;
-    }
+    } catch (...) { return -1; }
 }
 
 static bool GetNetworkActive() {
     if (!cls_NetworkClient.IsValid()) return false;
     try {
-        return cls_NetworkClient
-            .GetMethod("get_isConnected", 0)
+        return cls_NetworkClient.GetMethod("get_isConnected", 0)
             .cast<bool>()
             .Call();
-    } catch (...) {
-        return false;
-    }
+    } catch (...) { return false; }
 }
 
 // ═══════════════════════════════════════════════════════
-// DirectConnect
+// DirectConnect — اصلاح شده
 // ═══════════════════════════════════════════════════════
 static bool DirectConnect() {
-    L("[DC] start");
+    L("[DC] === START ===");
 
-    // 1. NetworkManager
-    if (!cls_NetworkManager.IsValid()) {
-        L("[DC] FAIL: NetworkManager class invalid");
-        return false;
-    }
-    L("[DC] NetworkManager class OK");
-
-    // 2. singleton
-    BNM::IL2CPP::Il2CppObject* mgr = nullptr;
-    try {
-        mgr = cls_NetworkManager
-            .GetMethod("get_singleton", 0)
-            .cast<BNM::IL2CPP::Il2CppObject*>()
-            .Call();
-    } catch (const std::exception& e) {
-        L("[DC] EX singleton: %s", e.what());
-        return false;
-    } catch (...) {
-        L("[DC] EX singleton: unknown");
-        return false;
-    }
-    L("[DC] singleton=%p", (void*) mgr);
-    if (!mgr) {
-        L("[DC] FAIL: singleton null");
-        return false;
-    }
-
-    // 3. Uri
+    // ─── ۱. ساخت URI ───
     BNM::Class uriCls("System", "Uri", BNM::Image("System.dll"));
-    L("[DC] Uri System.dll valid=%d", (int) uriCls.IsValid());
-
     if (!uriCls.IsValid()) {
         uriCls = BNM::Class("System", "Uri", BNM::Image("mscorlib.dll"));
-        L("[DC] Uri mscorlib.dll valid=%d", (int) uriCls.IsValid());
     }
-
     if (!uriCls.IsValid()) {
-        L("[DC] FAIL: System.Uri class not found");
+        L("[DC] FAIL: System.Uri not found");
         return false;
     }
 
-    // 4. Build URI string
     char buf[64];
     snprintf(buf, sizeof(buf), "kcp://%s:%d", SERVER_IP, SERVER_PORT);
-    L("[DC] uri=%s", buf);
 
-    // 5. Create Uri object
+    // روش ۱: CreateNewObjectParameters
     BNM::IL2CPP::Il2CppObject* uri = nullptr;
     try {
         uri = uriCls.CreateNewObjectParameters(BNM::CreateMonoString(buf));
-    } catch (const std::exception& e) {
-        L("[DC] EX Uri ctor: %s", e.what());
-        return false;
-    } catch (...) {
-        L("[DC] EX Uri ctor: unknown");
-        return false;
-    }
-    L("[DC] uri_obj=%p", (void*) uri);
+    } catch (...) {}
+    
+    // روش ۲: alloc + ctor
     if (!uri) {
-        L("[DC] FAIL: Uri alloc failed");
-        return false;
+        try {
+            uri = uriCls.CreateNewInstance();
+            if (uri) {
+                uriCls.GetMethod(".ctor", 1)
+                    .cast<void>()
+                    .Call(uri, BNM::CreateMonoString(buf));
+            }
+        } catch (...) {}
     }
 
-    // 6. StartClient
-    try {
-        cls_NetworkManager
-            .GetMethod("StartClient", 1)
-            .cast<void>()
-            .Call(mgr, uri);
-        L("[DC] StartClient OK");
-        return true;
-    } catch (const std::exception& e) {
-        L("[DC] EX StartClient: %s", e.what());
-    } catch (...) {
-        L("[DC] EX StartClient: unknown");
+    if (!uri) {
+        L("[DC] FAIL: Uri creation failed");
+        return false;
     }
+    L("[DC] uri=%s -> %p", buf, (void*)uri);
+
+    // ─── ۲. تلاش با CustomNetworkManager ───
+    if (cls_CustomNetworkManager.IsValid()) {
+        L("[DC] Trying CustomNetworkManager");
+        
+        try {
+            // singleton
+            auto* mgr = cls_CustomNetworkManager.GetMethod("get_singleton", 0)
+                            .cast<BNM::IL2CPP::Il2CppObject*>()
+                            .Call();
+            
+            if (mgr) {
+                L("[DC] Custom.singleton=%p", (void*)mgr);
+                
+                // StartClient(Uri)
+                auto startClient = cls_CustomNetworkManager.GetMethod("StartClient", 1);
+                if (startClient.IsValid()) {
+                    startClient.cast<void>().Call(mgr, uri);
+                    L("[DC] Custom.StartClient(Uri) CALLED");
+                    return true;
+                }
+            }
+        } catch (const std::exception& e) {
+            L("[DC] Custom ex: %s", e.what());
+        } catch (...) {
+            L("[DC] Custom ex unknown");
+        }
+    }
+
+    // ─── ۳. تلاش با NetworkManager ───
+    if (cls_NetworkManager.IsValid()) {
+        L("[DC] Trying NetworkManager");
+        
+        try {
+            auto* mgr = cls_NetworkManager.GetMethod("get_singleton", 0)
+                            .cast<BNM::IL2CPP::Il2CppObject*>()
+                            .Call();
+            
+            if (mgr) {
+                L("[DC] NM.singleton=%p", (void*)mgr);
+                
+                // روش ۱: StartClient(Uri)
+                auto startClient = cls_NetworkManager.GetMethod("StartClient", 1);
+                if (startClient.IsValid()) {
+                    startClient.cast<void>().Call(mgr, uri);
+                    L("[DC] NM.StartClient(Uri) CALLED");
+                    return true;
+                }
+                
+                // روش ۲: networkAddress + StartClient()
+                try {
+                    cls_NetworkManager.GetField("networkAddress")
+                        .cast<BNM::Structures::Mono::String*>()
+                        .Set(mgr, BNM::CreateMonoString(buf));
+                    L("[DC] networkAddress set");
+                    
+                    auto sc0 = cls_NetworkManager.GetMethod("StartClient", 0);
+                    if (sc0.IsValid()) {
+                        sc0.cast<void>().Call(mgr);
+                        L("[DC] NM.StartClient() CALLED");
+                        return true;
+                    }
+                } catch (...) {
+                    L("[DC] networkAddress method failed");
+                }
+            }
+        } catch (const std::exception& e) {
+            L("[DC] NM ex: %s", e.what());
+        } catch (...) {
+            L("[DC] NM ex unknown");
+        }
+    }
+
+    L("[DC] FAIL: all methods failed");
     return false;
 }
 
@@ -301,7 +321,6 @@ void TriggerStartGame() {
         L("--- StartGame ---");
         g_state.networkSuppressed = true;
 
-        // Wait for GtaMenu
         int tries = 0;
         while (tries < 100) {
             auto* gta = GetGtaMenu();
@@ -320,7 +339,7 @@ void TriggerStartGame() {
 
         JB_ShowJoinNotification();
         bool ok = DirectConnect();
-        L("[SG] connect=%d", (int) ok);
+        L("[SG] connect=%d", (int)ok);
     }).detach();
 }
 
@@ -377,24 +396,27 @@ void InstallGameHooks() {
     cls_Selectable     = BNM::Class("UnityEngine.UI", "Selectable", imgUI);
     cls_NetworkManager = BNM::Class("Mirror", "NetworkManager", imgMirror);
     cls_NetworkClient  = BNM::Class("Mirror", "NetworkClient", imgMirror);
+    cls_CustomNetworkManager = BNM::Class("", "CustomNetworkManager", imgAssembly);
 
-    L("GtaMenu valid=%d", (int) cls_GtaMenu.IsValid());
-    L("Button valid=%d", (int) cls_Button.IsValid());
-    L("Selectable valid=%d", (int) cls_Selectable.IsValid());
-    L("NetworkManager valid=%d", (int) cls_NetworkManager.IsValid());
-    L("NetworkClient valid=%d", (int) cls_NetworkClient.IsValid());
+    L("GtaMenu=%d", (int)cls_GtaMenu.IsValid());
+    L("Button=%d", (int)cls_Button.IsValid());
+    L("Selectable=%d", (int)cls_Selectable.IsValid());
+    L("NetworkManager=%d", (int)cls_NetworkManager.IsValid());
+    L("NetworkClient=%d", (int)cls_NetworkClient.IsValid());
+    L("CustomNetworkManager=%d", (int)cls_CustomNetworkManager.IsValid());
 
+    // ─── Button.Awake hook ───
     if (cls_Button.IsValid()) {
         auto awake = cls_Button.GetMethod("Awake", 0);
-        void* addr = (void*) awake.GetOffset();
+        void* addr = (void*)awake.GetOffset();
         L("Button.Awake addr=%p", addr);
-
+        
         if (addr) {
             void* stub = shadowhook_hook_func_addr(
                 addr,
-                (void*) Hook_Button_Awake,
-                (void**) &orig_Button_Awake);
-
+                (void*)Hook_Button_Awake,
+                (void**)&orig_Button_Awake);
+            
             if (stub) {
                 L("Button.Awake hook OK");
             } else {
@@ -402,7 +424,7 @@ void InstallGameHooks() {
             }
         }
     } else {
-        L("Button class invalid, cannot hook Awake");
+        L("Button class invalid");
     }
 
     L("=== done ===");
