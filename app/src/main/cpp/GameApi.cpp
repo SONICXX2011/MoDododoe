@@ -70,22 +70,18 @@ std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls) {
         return result;
     }
 
-    // 1) Il2CppType*
     auto* il2cppType = cls.GetIl2CppType();
     if (!il2cppType) {
         LOGI("[GameApi] il2cppType NULL");
         return result;
     }
 
-    // 2) Il2CppType* → System.Type
     auto* typeObj = g_typeGetObject(il2cppType);
     if (!typeObj) {
         LOGI("[GameApi] typeObj NULL");
         return result;
     }
-    LOGI("[GameApi] typeObj=%p", (void*)typeObj);
 
-    // 3) ICall(System.Type) → Il2CppArray*
     auto* arr = g_findObjects(typeObj);
     if (!arr) {
         LOGI("[GameApi] ICall returned NULL");

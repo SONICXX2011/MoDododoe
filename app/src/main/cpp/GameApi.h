@@ -12,6 +12,7 @@
 
 namespace GameApi {
 
+// فقط روی main thread صدا زده بشه!
 void Init();
 bool IsReady();
 

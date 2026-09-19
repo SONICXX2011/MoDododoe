@@ -85,6 +85,7 @@ static std::atomic<bool> g_requestDisable{false};
 static std::atomic<bool> g_requestGetObjects{false};
 static std::atomic<bool> g_hookInstalled{false};
 static std::atomic<bool> g_running{false};
+static std::atomic<bool> g_listenersInstalled{false};
 static std::thread       g_retryThread;
 
 static int   g_lastMenu = -1;
@@ -295,6 +296,13 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     if (orig_Update) ((void(*)(void*,void*))orig_Update)(self, methodInfo);
     auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
 
+    // ─── Install listeners روی main thread (فقط یک بار) ───
+    if (!g_listenersInstalled.load()) {
+        g_listenersInstalled.store(true);
+        L("[Update] installing listeners on main thread...");
+        InstallButtonListeners();
+    }
+
     if (g_requestConnect.exchange(false)) {
         L("[Update] connect");
         DoDirectConnect();
@@ -402,7 +410,7 @@ void InstallGameHooks() {
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
-    InstallButtonListeners();
+    // InstallButtonListeners(); ← حذف شد، میره توی Update hook
 
     L("=== done ===");
 }
