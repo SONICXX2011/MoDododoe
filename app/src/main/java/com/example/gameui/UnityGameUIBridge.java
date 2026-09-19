@@ -1,6 +1,9 @@
 package com.example.gameui;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -10,6 +13,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -27,9 +31,7 @@ public class UnityGameUIBridge {
     private static UnityGameUIBridge sInstance;
 
     public static synchronized UnityGameUIBridge getInstance() {
-        if (sInstance == null) {
-            sInstance = new UnityGameUIBridge();
-        }
+        if (sInstance == null) sInstance = new UnityGameUIBridge();
         return sInstance;
     }
 
@@ -46,54 +48,58 @@ public class UnityGameUIBridge {
         if (activity == null) return;
         mCurrentActivity = activity;
         activity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                addView(activity);
-            }
+            @Override public void run() { addView(activity); }
         });
     }
 
-    public void hide() {
-        Log.i(TAG, "hide() called");
-    }
+    public void hide() { Log.i(TAG, "hide() called"); }
 
     public void setGameState(int menu, boolean networkActive) {
         updateStatus("menu=" + menu + " net=" + networkActive);
     }
 
-    public void setPlayerName(String name) {
-    }
-
-    public void showJoinNotification() {
-        log("Join notification");
-    }
-
-    public void onCharacterEvent() {
-    }
-
-    public void onBackMenuEvent() {
-    }
-
-    public void onExitEvent() {
-        log("Network exit");
-    }
-
-    public void showWelcomeOnce(Activity activity) {
-    }
+    public void setPlayerName(String name) {}
+    public void showJoinNotification() { log("Join notification"); }
+    public void onCharacterEvent() {}
+    public void onBackMenuEvent() {}
+    public void onExitEvent() { log("Network exit"); }
+    public void showWelcomeOnce(Activity activity) {}
 
     public void log(final String msg) {
         Log.i(TAG, msg);
         if (mCurrentActivity == null) return;
         mCurrentActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
+            @Override public void run() {
                 if (mLogText == null) return;
                 String cur = mLogText.getText().toString();
                 String next = cur + msg + "\n";
-                if (next.length() > 4000) {
-                    next = next.substring(next.length() - 4000);
-                }
+                if (next.length() > 40000) next = next.substring(next.length() - 40000);
                 mLogText.setText(next);
+            }
+        });
+    }
+
+    private void copyLogsToClipboard() {
+        try {
+            if (mLogText == null || mCurrentActivity == null) return;
+            String text = mLogText.getText().toString();
+            ClipboardManager cm = (ClipboardManager)
+                    mCurrentActivity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("LACMod Logs", text));
+                Toast.makeText(mCurrentActivity, "Logs copied!", Toast.LENGTH_SHORT).show();
+                Log.i(TAG, "Logs copied (" + text.length() + " chars)");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "copyLogs failed", e);
+        }
+    }
+
+    private void clearLogs() {
+        if (mLogText == null || mCurrentActivity == null) return;
+        mCurrentActivity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (mLogText != null) mLogText.setText("");
             }
         });
     }
@@ -105,8 +111,8 @@ public class UnityGameUIBridge {
 
         FrameLayout container = new FrameLayout(activity);
         container.setLayoutParams(new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
         container.setClickable(false);
 
         LinearLayout panel = new LinearLayout(activity);
@@ -120,8 +126,7 @@ public class UnityGameUIBridge {
         panel.setBackground(bg);
 
         FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
-            900,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
+                950, ViewGroup.LayoutParams.WRAP_CONTENT);
         panelLp.gravity = Gravity.TOP | Gravity.START;
         panelLp.leftMargin = 40;
         panelLp.topMargin = 150;
@@ -142,6 +147,7 @@ public class UnityGameUIBridge {
         mStatusText.setPadding(0, 0, 0, 20);
         panel.addView(mStatusText);
 
+        // Row 1
         LinearLayout row1 = new LinearLayout(activity);
         row1.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -153,10 +159,8 @@ public class UnityGameUIBridge {
         jbg.setColor(0xFF00C853);
         jbg.setCornerRadius(12f);
         joinBtn.setBackground(jbg);
-        joinBtn.setPadding(30, 20, 30, 20);
         joinBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+            @Override public void onClick(View v) {
                 log("--- Join clicked ---");
                 updateStatus("Joining...");
                 nativeRequestStartGame();
@@ -165,25 +169,23 @@ public class UnityGameUIBridge {
         row1.addView(joinBtn);
 
         Button dumpBtn = new Button(activity);
-        dumpBtn.setText("Dump StartClient");
+        dumpBtn.setText("Dump");
         dumpBtn.setTextColor(Color.WHITE);
         dumpBtn.setTextSize(12);
         GradientDrawable dbg = new GradientDrawable();
         dbg.setColor(0xFF2196F3);
         dbg.setCornerRadius(12f);
         dumpBtn.setBackground(dbg);
-        dumpBtn.setPadding(30, 20, 30, 20);
         dumpBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                log("--- Dump StartClient ---");
+            @Override public void onClick(View v) {
+                log("--- Dump ---");
                 nativeDumpStartClient();
             }
         });
         row1.addView(dumpBtn);
-
         panel.addView(row1);
 
+        // Row 2
         LinearLayout row2 = new LinearLayout(activity);
         row2.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -195,15 +197,44 @@ public class UnityGameUIBridge {
         disbg.setColor(0xFF9C27B0);
         disbg.setCornerRadius(12f);
         disableBtn.setBackground(disbg);
-        disableBtn.setPadding(30, 20, 30, 20);
         disableBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+            @Override public void onClick(View v) {
                 log("--- Disable Buttons ---");
                 nativeDisableButtons();
             }
         });
         row2.addView(disableBtn);
+
+        Button clearBtn = new Button(activity);
+        clearBtn.setText("Clear");
+        clearBtn.setTextColor(Color.WHITE);
+        clearBtn.setTextSize(12);
+        GradientDrawable clbg = new GradientDrawable();
+        clbg.setColor(0xFFFF9800);
+        clbg.setCornerRadius(12f);
+        clearBtn.setBackground(clbg);
+        clearBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { clearLogs(); }
+        });
+        row2.addView(clearBtn);
+        panel.addView(row2);
+
+        // Row 3
+        LinearLayout row3 = new LinearLayout(activity);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button copyBtn = new Button(activity);
+        copyBtn.setText("Copy Logs");
+        copyBtn.setTextColor(Color.WHITE);
+        copyBtn.setTextSize(12);
+        GradientDrawable cpybg = new GradientDrawable();
+        cpybg.setColor(0xFF00BCD4);
+        cpybg.setCornerRadius(12f);
+        copyBtn.setBackground(cpybg);
+        copyBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { copyLogsToClipboard(); }
+        });
+        row3.addView(copyBtn);
 
         Button closeBtn = new Button(activity);
         closeBtn.setText("Close");
@@ -213,21 +244,15 @@ public class UnityGameUIBridge {
         cbg.setColor(0xFFE53935);
         cbg.setCornerRadius(12f);
         closeBtn.setBackground(cbg);
-        closeBtn.setPadding(30, 20, 30, 20);
         closeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                removeView();
-            }
+            @Override public void onClick(View v) { removeView(); }
         });
-        row2.addView(closeBtn);
-
-        panel.addView(row2);
+        row3.addView(closeBtn);
+        panel.addView(row3);
 
         ScrollView scroll = new ScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            600);
+                ViewGroup.LayoutParams.MATCH_PARENT, 600);
         scrollLp.topMargin = 20;
         scroll.setLayoutParams(scrollLp);
         scroll.setBackgroundColor(0xFF000000);
@@ -262,11 +287,8 @@ public class UnityGameUIBridge {
         Log.i(TAG, "status: " + s);
         if (mCurrentActivity == null) return;
         mCurrentActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (mStatusText != null) {
-                    mStatusText.setText(s);
-                }
+            @Override public void run() {
+                if (mStatusText != null) mStatusText.setText(s);
             }
         });
     }
