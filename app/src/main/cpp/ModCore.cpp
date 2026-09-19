@@ -14,8 +14,10 @@
 #include <chrono>
 #include <atomic>
 #include <string>
+#include <string_view>
 #include <cstdio>
 #include <cstdarg>
+#include <cctype>
 
 #define LOG_TAG "LACMod"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -118,14 +120,13 @@ static bool DirectConnect() {
     L("[DC] uri=%s obj=%p", uriStr, (void*)uriObj);
 
     // ── 4) StartClient(Uri) با type-matching ──
-    BNM::CompileTimeClass uriType = 
+    BNM::CompileTimeClass uriType =
         BNM::CompileTimeClassBuilder("System", "Uri").Build();
 
     auto m = cls_NetworkManager.GetMethod("StartClient", {uriType});
 
     if (!m.IsValid()) {
-        L("[DC] StartClient(Uri) NOT FOUND by type");
-        // fallback: iterate GetMethods و اسم رو چک کن
+        L("[DC] StartClient(Uri) NOT FOUND by type — fallback by name");
         auto methods = cls_NetworkManager.GetMethods();
         for (auto& mm : methods) {
             try {
@@ -133,7 +134,7 @@ static bool DirectConnect() {
                 if (!info || !info->name) continue;
                 if (std::string(info->name) != "StartClient") continue;
                 if (info->parameters_count != 1) continue;
-                
+
                 L("[DC] candidate StartClient arg-count=%d ptr=%p",
                   (int)info->parameters_count, (void*)info->methodPointer);
                 m = mm;
@@ -150,7 +151,7 @@ static bool DirectConnect() {
     L("[DC] StartClient sig: %s", m.str().c_str());
 
     m.cast<void>().Call(mgr, uriObj);
-    L("[DC] StartClient(Uri) CALLED ✓");
+    L("[DC] StartClient(Uri) CALLED OK");
     return true;
 }
 
@@ -174,10 +175,10 @@ void TriggerStartGame() {
 
 // ═══════════════════════════════════════════════════════
 // HOOK: CustomNetworkManager.OnClientError
-// 
+//
 // مهم: از BNM::InvokeHook استفاده می‌کنیم نه shadowhook!
 // دلیل: shadowhook 2.0.1 روی Android 16 با err=12 (INIT_LINKER)
-// فیل می‌شه. InvokeHook مستقیم MethodInfo->methodPointer رو 
+// فیل می‌شه. InvokeHook مستقیم MethodInfo->methodPointer رو
 // عوض می‌کنه، بدون وابستگی به shadowhook.
 // ═══════════════════════════════════════════════════════
 static void* orig_OnClientError = nullptr;
@@ -190,7 +191,7 @@ static void Hook_OnClientError(void* self, int transportError, void* message) {
         } catch (...) {}
     }
 
-    L("★★★ OnClientError err=%d msg=%s", transportError, msg.c_str());
+    L("*** OnClientError err=%d msg=%s", transportError, msg.c_str());
 
     if (orig_OnClientError) {
         ((void(*)(void*,int,void*))orig_OnClientError)(self, transportError, message);
@@ -217,7 +218,7 @@ static void InstallOnClientErrorHook() {
     L("[Hook] InvokeHook=%d orig=%p", (int)ok, orig_OnClientError);
 
     if (ok) {
-        L("[Hook] OnClientError installed ✓");
+        L("[Hook] OnClientError installed OK");
     } else {
         L("[Hook] FAILED");
     }
@@ -226,8 +227,8 @@ static void InstallOnClientErrorHook() {
 // ═══════════════════════════════════════════════════════
 // DISABLE BUTTONS
 // معادل Il2Cpp.gc.choose(Button) در TS
-// 
-// از آرایه‌های GtaMenuControl استفاده می‌کنیم چون معادل 
+//
+// از آرایه‌های GtaMenuControl استفاده می‌کنیم چون معادل
 // gc.choose در BNM وجود نداره.
 // ═══════════════════════════════════════════════════════
 
@@ -235,7 +236,7 @@ static bool IsTargetName(const std::string& name) {
     if (name.empty()) return false;
     std::string n;
     for (char c : name) {
-        if (!isspace((unsigned char)c) && c != '_' && c != '-') 
+        if (!isspace((unsigned char)c) && c != '_' && c != '-')
             n += toupper((unsigned char)c);
     }
     return n == "LACEDITOR" || n == "COMMUNITY" || n == "DOCUMENT";
@@ -288,9 +289,9 @@ static void ProcessButtonArray(BNM::IL2CPP::Il2CppObject* gta, const char* field
                     .GetMethod("set_interactable", 1)
                     .cast<void>()
                     .Call(btn, false);
-                L("[DIS]   → DISABLED '%s' ✓", name.c_str());
+                L("[DIS]   -> DISABLED '%s'", name.c_str());
             } catch (...) {
-                L("[DIS]   → set_interactable failed");
+                L("[DIS]   -> set_interactable failed");
             }
         }
     }
@@ -316,7 +317,7 @@ static void StateLoop() {
     L("StateLoop started");
 
     using clock = std::chrono::steady_clock;
-    auto last       = clock::now();
+    auto last        = clock::now();
     auto lastDisable = clock::now();
 
     while (g_running) {
@@ -359,12 +360,13 @@ static void StateLoop() {
 static void ResolveUriClass() {
     // استراتژی Frida: همه‌ی assemblyها رو بگرد
     cls_Uri = BNM::Class("System", "Uri");
-    
+
     if (cls_Uri.IsValid()) {
-        L("Uri found in: %s", cls_Uri.GetImage().str().c_str());
+        std::string_view imgName = cls_Uri.GetImage().str();
+        L("Uri found in: %.*s", (int)imgName.size(), imgName.data());
         return;
     }
-    
+
     L("!!! Uri NOT found in ANY assembly");
 }
 
