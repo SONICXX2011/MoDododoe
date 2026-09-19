@@ -1,5 +1,6 @@
 #include "JavaBridge.h"
 #include "Globals.h"
+#include "ModCore.h"
 
 #include <android/log.h>
 
@@ -7,7 +8,6 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ─── Global cached method IDs ───
 jmethodID mid_show                 = nullptr;
 jmethodID mid_hide                 = nullptr;
 jmethodID mid_setGameState         = nullptr;
@@ -17,7 +17,6 @@ jmethodID mid_onCharacterEvent     = nullptr;
 jmethodID mid_onBackMenuEvent      = nullptr;
 jmethodID mid_onExitEvent          = nullptr;
 
-// ─── Helpers ───
 static jobject GetActivity(JNIEnv* env) {
     jclass up = env->FindClass("com/unity3d/player/UnityPlayer");
     if (!up) {
@@ -38,7 +37,6 @@ static jobject GetActivity(JNIEnv* env) {
     return env->GetStaticObjectField(up, fid);
 }
 
-// ─── JNI: nativeInit ───
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_gameui_UnityGameUIBridge_nativeInit(
     JNIEnv* env,
@@ -99,17 +97,14 @@ Java_com_example_gameui_UnityGameUIBridge_nativeInit(
     LOGI("nativeInit: bridge cached");
 }
 
-// ─── JNI: request start game ───
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_gameui_UnityGameUIBridge_nativeRequestStartGame(
     JNIEnv*, jclass)
 {
     LOGI("JNI: StartGame requested");
-    extern void TriggerStartGame();
     TriggerStartGame();
 }
 
-// ─── JNI: request exit ───
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_gameui_UnityGameUIBridge_nativeRequestExit(
     JNIEnv*, jclass)
@@ -117,7 +112,6 @@ Java_com_example_gameui_UnityGameUIBridge_nativeRequestExit(
     LOGI("JNI: Exit requested");
 }
 
-// ─── Internal helpers ───
 static void CallVoid(jmethodID mid) {
     if (!mid || !g_bridgeInstance) return;
 
