@@ -36,11 +36,6 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
-static std::string ReadMonoString(BNM::Structures::Mono::String* s) {
-    if (!s) return "";
-    try { return s->str(); } catch (...) { return ""; }
-}
-
 // ═══════════════════════════════════════════════════════
 // CLICK HANDLERS
 // ═══════════════════════════════════════════════════════
@@ -80,12 +75,14 @@ static BNM::Class cls_NetworkManager;
 static BNM::Class cls_NetworkClient;
 static BNM::Class cls_CustomNetworkManager;
 static BNM::Class cls_Uri;
+static BNM::Class cls_Button;
 
 // ═══════════════════════════════════════════════════════
 // FLAGS
 // ═══════════════════════════════════════════════════════
 static std::atomic<bool> g_requestConnect{false};
 static std::atomic<bool> g_requestDisable{false};
+static std::atomic<bool> g_requestGetObjects{false};
 static std::atomic<bool> g_hookInstalled{false};
 static std::atomic<bool> g_running{false};
 static std::thread       g_retryThread;
@@ -123,6 +120,28 @@ static bool ReadNetworkActive() {
         if (cls_NetworkClient.GetMethod("get_active", 0).cast<bool>().Call()) return true;
     } catch (...) {}
     return false;
+}
+
+// ═══════════════════════════════════════════════════════
+// GET OBJECTS
+// ═══════════════════════════════════════════════════════
+static void DoGetAllObjects() {
+    L("========== GET OBJECTS ==========");
+
+    if (!cls_Button.IsValid()) {
+        L("[OBJ] Button class invalid");
+        return;
+    }
+
+    auto all = GameApi::GetAllInstances(cls_Button);
+    L("[OBJ] Total Button instances: %zu", all.size());
+
+    for (size_t i = 0; i < all.size(); i++) {
+        std::string name = GameApi::GetName(all[i]);
+        L("[OBJ] [%zu] '%s' @ %p", i, name.c_str(), (void*)all[i]);
+    }
+
+    L("========== END ==========");
 }
 
 // ═══════════════════════════════════════════════════════
@@ -166,7 +185,12 @@ static const std::vector<std::string> EXIT_NAMES = {
 static void InstallButtonListeners() {
     L("[LISTENERS] === START ===");
 
-    auto buttons = GameApi::GetAllObjects("UnityEngine.UI.Button");
+    if (!cls_Button.IsValid()) {
+        L("[LISTENERS] Button class invalid");
+        return;
+    }
+
+    auto buttons = GameApi::GetAllInstances(cls_Button);
     if (buttons.empty()) { L("[LISTENERS] no buttons"); return; }
 
     auto cls = BNM::Class("MyModMenu", "ClickHandlers");
@@ -277,21 +301,27 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     }
     if (g_requestDisable.exchange(false)) {
         L("[Update] disable");
-        auto buttons = GameApi::GetAllObjects("UnityEngine.UI.Button");
-        int dis = 0;
-        for (auto* btn : buttons) {
-            std::string name = GameApi::GetName(btn);
-            if (GameApi::MatchesName(name, {"LACEDITOR", "COMMUNITY", "DOCUMENT", "LAN"}))
-                if (GameApi::SetInteractable(btn, false)) dis++;
+        if (cls_Button.IsValid()) {
+            auto buttons = GameApi::GetAllInstances(cls_Button);
+            int dis = 0;
+            for (auto* btn : buttons) {
+                std::string name = GameApi::GetName(btn);
+                if (GameApi::MatchesName(name, {"LACEDITOR", "COMMUNITY", "DOCUMENT", "LAN"}))
+                    if (GameApi::SetInteractable(btn, false)) dis++;
+            }
+            L("[DIS] %d", dis);
         }
-        L("[DIS] %d", dis);
+    }
+    if (g_requestGetObjects.exchange(false)) {
+        L("[Update] get objects");
+        DoGetAllObjects();
     }
 
     g_frameCounter++;
     if (g_frameCounter >= 120) {
         g_frameCounter = 0;
-        if (ReadCurrentMenu(selfObj) == 0) {
-            auto buttons = GameApi::GetAllObjects("UnityEngine.UI.Button");
+        if (ReadCurrentMenu(selfObj) == 0 && cls_Button.IsValid()) {
+            auto buttons = GameApi::GetAllInstances(cls_Button);
             for (auto* btn : buttons) {
                 std::string name = GameApi::GetName(btn);
                 if (GameApi::MatchesName(name, {"LACEDITOR", "COMMUNITY", "DOCUMENT", "LAN"}))
@@ -349,12 +379,15 @@ static void ResolveClasses() {
     if (!imgAsm.IsValid()) imgAsm = BNM::Image("Assembly-CSharp");
     auto imgMirror = BNM::Image("Mirror.dll");
     if (!imgMirror.IsValid()) imgMirror = BNM::Image("Mirror");
+    auto imgUI     = BNM::Image("UnityEngine.UI.dll");
+    if (!imgUI.IsValid()) imgUI = BNM::Image("UnityEngine.UI");
 
     cls_GtaMenu              = BNM::Class("", "GtaMenuControl", imgAsm);
     cls_NetworkManager       = BNM::Class("Mirror", "NetworkManager", imgMirror);
     cls_NetworkClient        = BNM::Class("Mirror", "NetworkClient", imgMirror);
     cls_CustomNetworkManager = BNM::Class("", "CustomNetworkManager", imgAsm);
     cls_Uri                  = BNM::Class("System", "Uri");
+    cls_Button               = BNM::Class("UnityEngine.UI", "Button", imgUI);
 }
 
 void InstallGameHooks() {
@@ -362,10 +395,10 @@ void InstallGameHooks() {
     GameApi::Init();
     ResolveClasses();
 
-    L("Gta=%d NM=%d NC=%d CNM=%d Uri=%d",
+    L("Gta=%d NM=%d NC=%d CNM=%d Uri=%d Btn=%d",
       (int)cls_GtaMenu.IsValid(), (int)cls_NetworkManager.IsValid(),
       (int)cls_NetworkClient.IsValid(), (int)cls_CustomNetworkManager.IsValid(),
-      (int)cls_Uri.IsValid());
+      (int)cls_Uri.IsValid(), (int)cls_Button.IsValid());
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
@@ -376,6 +409,7 @@ void InstallGameHooks() {
 
 void TriggerStartGame() { g_requestConnect.store(true); }
 void DisableModButtons() { g_requestDisable.store(true); }
+void GetObjectsRequest() { g_requestGetObjects.store(true); }
 void DumpStartClientInfo() { L("[JNI] dump"); }
 
 void StartStateLoop() {

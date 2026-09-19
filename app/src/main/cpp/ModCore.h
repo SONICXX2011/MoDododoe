@@ -6,3 +6,4 @@ void StopStateLoop();
 void TriggerStartGame();
 void DumpStartClientInfo();
 void DisableModButtons();
+void GetObjectsRequest();

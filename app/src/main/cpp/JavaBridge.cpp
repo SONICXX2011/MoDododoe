@@ -88,6 +88,14 @@ Java_com_example_gameui_UnityGameUIBridge_nativeDisableButtons(
     DisableModButtons();
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_gameui_UnityGameUIBridge_nativeGetObjects(
+    JNIEnv*, jclass)
+{
+    LOGI("JNI: GetObjects");
+    GetObjectsRequest();
+}
+
 static void CallVoid(jmethodID mid) {
     if (!mid || !g_bridgeInstance) return;
     bool detach = false;
