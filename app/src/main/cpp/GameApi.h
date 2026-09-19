@@ -15,9 +15,8 @@ namespace GameApi {
 void Init();
 bool IsReady();
 
-// فقط آبجکت‌های زنده (با ۳ لایه فیلتر)
 std::vector<BNM::IL2CPP::Il2CppObject*> GetAllInstances(BNM::Class cls);
-
+int GetInstanceID(BNM::IL2CPP::Il2CppObject* obj);
 std::string GetName(BNM::IL2CPP::Il2CppObject* obj);
 std::string Normalize(const std::string& s);
 bool MatchesName(const std::string& actual,

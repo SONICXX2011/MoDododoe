@@ -135,11 +135,12 @@ static void DoGetAllObjects() {
     }
 
     auto all = GameApi::GetAllInstances(cls_Button);
-    L("[OBJ] Total Button instances: %zu", all.size());
+    L("[OBJ] Total: %zu", all.size());
 
     for (size_t i = 0; i < all.size(); i++) {
+        int id = GameApi::GetInstanceID(all[i]);
         std::string name = GameApi::GetName(all[i]);
-        L("[OBJ] [%zu] '%s' @ %p", i, name.c_str(), (void*)all[i]);
+        L("[OBJ] [%zu] id=%d name='%s'", i, id, name.c_str());
     }
 
     L("========== END ==========");
@@ -171,7 +172,7 @@ static BNM::IL2CPP::Il2CppObject* CreateUnityAction(BNM::MethodBase method) {
 }
 
 // ═══════════════════════════════════════════════════════
-// INSTALL BUTTON LISTENERS
+// INSTALL BUTTON LISTENERS (با STAGE logging)
 // ═══════════════════════════════════════════════════════
 static const std::vector<std::string> CHARACTER_NAMES = {
     "Character", "CHARACTER", "CharacterButton", "CharSelect", "CharSelectButton"
@@ -186,64 +187,77 @@ static const std::vector<std::string> EXIT_NAMES = {
 static void InstallButtonListeners() {
     L("[LISTENERS] === START ===");
 
-    if (!cls_Button.IsValid()) {
-        L("[LISTENERS] Button class invalid");
-        return;
-    }
+    if (!cls_Button.IsValid()) { L("[LISTENERS] Button invalid"); return; }
 
+    // ─── STAGE-1: فقط گرفتن آرایه ───
     auto buttons = GameApi::GetAllInstances(cls_Button);
-    if (buttons.empty()) { L("[LISTENERS] no buttons"); return; }
+    L("[LISTENERS] STAGE-1: got %zu objects", buttons.size());
 
-    auto cls = BNM::Class("MyModMenu", "ClickHandlers");
-    if (!cls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
+    if (buttons.empty()) { L("[LISTENERS] empty"); return; }
 
-    auto charMethod = cls.GetMethod("OnCharacterClick", 0);
-    auto backMethod = cls.GetMethod("OnBackMenuClick", 0);
-    auto exitMethod = cls.GetMethod("OnExitClick", 0);
+    // ─── STAGE-2: لاگ ID + Name ───
+    size_t logLimit = buttons.size() < 15 ? buttons.size() : 15;
+    for (size_t i = 0; i < logLimit; i++) {
+        int id = GameApi::GetInstanceID(buttons[i]);
+        std::string name = GameApi::GetName(buttons[i]);
+        L("[LISTENERS] STAGE-2: [%zu] id=%d name='%s'", i, id, name.c_str());
+    }
+    L("[LISTENERS] STAGE-2: done");
 
+    // ─── STAGE-3: چک ClickHandlers ───
+    auto handlerCls = BNM::Class("MyModMenu", "ClickHandlers");
+    if (!handlerCls.IsValid()) { L("[LISTENERS] ClickHandlers not found"); return; }
+
+    auto charMethod = handlerCls.GetMethod("OnCharacterClick", 0);
+    auto backMethod = handlerCls.GetMethod("OnBackMenuClick", 0);
+    auto exitMethod = handlerCls.GetMethod("OnExitClick", 0);
     if (!charMethod.IsValid() || !backMethod.IsValid() || !exitMethod.IsValid()) {
         L("[LISTENERS] methods not found");
         return;
     }
+    L("[LISTENERS] STAGE-3: methods ok");
 
+    // ─── STAGE-4: ساخت delegateها ───
     auto* charDel = CreateUnityAction(charMethod);
     auto* backDel = CreateUnityAction(backMethod);
     auto* exitDel = CreateUnityAction(exitMethod);
-
     if (!charDel || !backDel || !exitDel) {
         L("[LISTENERS] delegate creation failed");
         return;
     }
+    L("[LISTENERS] STAGE-4: delegates ok");
 
+    // ─── STAGE-5: iterate و bind ───
     int bound = 0;
-    for (auto* btn : buttons) {
+    for (size_t i = 0; i < buttons.size(); i++) {
+        auto* btn = buttons[i];
+        if (!btn) continue;
+
         std::string name = GameApi::GetName(btn);
         if (name.empty()) continue;
 
         BNM::IL2CPP::Il2CppObject* target = nullptr;
         const char* role = nullptr;
-
         if (GameApi::MatchesName(name, CHARACTER_NAMES)) { target = charDel; role = "Character"; }
         else if (GameApi::MatchesName(name, BACKMENU_NAMES)) { target = backDel; role = "BackMenu"; }
         else if (GameApi::MatchesName(name, EXIT_NAMES)) { target = exitDel; role = "Exit"; }
         else continue;
 
-        try {
-            auto* onClick = BNM::Class(btn)
-                .GetMethod("get_onClick", 0)
-                .cast<BNM::IL2CPP::Il2CppObject*>()
-                [btn]();
+        L("[LISTENERS] STAGE-5: trying %s -> %s", name.c_str(), role);
 
-            if (!onClick) continue;
+        auto* onClick = BNM::Class(btn)
+            .GetMethod("get_onClick", 0)
+            .cast<BNM::IL2CPP::Il2CppObject*>()
+            [btn]();
+        if (!onClick) { L("[LISTENERS] STAGE-5: %s onClick null", name.c_str()); continue; }
 
-            BNM::Class(onClick)
-                .GetMethod("AddListener", 1)
-                .cast<void>()
-                [onClick](target);
+        BNM::Class(onClick)
+            .GetMethod("AddListener", 1)
+            .cast<void>()
+            [onClick](target);
 
-            L("[LISTENERS] %s -> %s", name.c_str(), role);
-            bound++;
-        } catch (...) {}
+        L("[LISTENERS] STAGE-5: bound %s -> %s", name.c_str(), role);
+        bound++;
     }
 
     L("[LISTENERS] === END: bound %d ===", bound);
@@ -410,7 +424,7 @@ void InstallGameHooks() {
 
     InstallOnClientErrorHook();
     InstallUpdateHook();
-    // InstallButtonListeners(); ← حذف شد، میره توی Update hook
+    // InstallButtonListeners(); ← میره توی Update hook (main thread)
 
     L("=== done ===");
 }
