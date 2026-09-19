@@ -25,7 +25,6 @@ jclass       g_bridgeClass = nullptr;
 jobject      g_bridgeInstance = nullptr;
 RuntimeState g_state;
 
-// نگه‌داشتن handle کتابخانه il2cpp
 static void* g_il2cppHandle = nullptr;
 
 JNIEnv* GetEnv() {
@@ -54,23 +53,6 @@ void DetachThreadIfNeeded(bool needsDetach) {
     if (needsDetach && g_vm) g_vm->DetachCurrentThread();
 }
 
-// ═══════════════════════════════════════════════════════
-// Custom method finder — با dlsym مستقیم
-// ═══════════════════════════════════════════════════════
-static void* CustomMethodFinder(const char* name, void* userData) {
-    void* handle = userData;
-    if (!handle) return nullptr;
-
-    void* addr = dlsym(handle, name);
-    if (addr) {
-        LOGI("Finder: %s -> %p", name, addr);
-    }
-    return addr;
-}
-
-// ═══════════════════════════════════════════════════════
-// BNM loaded callback
-// ═══════════════════════════════════════════════════════
 static void OnBNMLoaded() {
     LOGI("=== BNM READY ===");
     JB_Log("=== BNM READY ===");
@@ -95,13 +77,10 @@ static void OnBNMLoaded() {
     StartStateLoop();
 }
 
-// ═══════════════════════════════════════════════════════
-// Poll thread
-// ═══════════════════════════════════════════════════════
-static void PollAndLoad() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+static void PollAndSetup() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    LOGI("Poll: looking for libil2cpp.so");
+    LOGI("Poll: waiting for libil2cpp.so");
     JB_Log("Polling libil2cpp...");
 
     for (int i = 0; i < 100; i++) {
@@ -120,33 +99,23 @@ static void PollAndLoad() {
         return;
     }
 
-    // روش ۱: با custom finder و TryLoadByUsersFinder
-    LOGI("Setting custom method finder");
-    JB_Log("Setting custom finder...");
+    // 1. Set method finder with dlopen handle
+    LOGI("Setting method finder...");
+    JB_Log("Setting finder...");
+    BNM::Loading::SetMethodFinder([](const char* name, void* userData) -> void* {
+        return dlsym(userData, name);
+    }, g_il2cppHandle);
 
-    BNM::Loading::SetMethodFinder(CustomMethodFinder, g_il2cppHandle);
+    // 2. DIRECT LOAD — no il2cpp_init hook needed!
+    LOGI("Calling TrySetupByUsersFinder (direct Load)");
+    JB_Log("TrySetupByUsersFinder...");
 
-    LOGI("Calling TryLoadByUsersFinder");
-    JB_Log("TryLoadByUsersFinder...");
+    BNM::Loading::TrySetupByUsersFinder();
 
-    bool ok = BNM::Loading::TryLoadByUsersFinder();
-
-    LOGI("TryLoadByUsersFinder -> %s", ok ? "OK" : "FAIL");
-    JB_Log(std::string("TryLoadByUsersFinder: ") + (ok ? "OK" : "FAIL"));
-
-    if (!ok) {
-        LOGE("UsersFinder failed — trying fallback dlfcn handle");
-        JB_Log("Fallback TryLoadByDlfcnHandle...");
-
-        bool ok2 = BNM::Loading::TryLoadByDlfcnHandle(g_il2cppHandle);
-        LOGI("TryLoadByDlfcnHandle -> %s", ok2 ? "OK" : "FAIL");
-        JB_Log(std::string("TryLoadByDlfcnHandle: ") + (ok2 ? "OK" : "FAIL"));
-    }
+    LOGI("TrySetupByUsersFinder returned");
+    JB_Log("TrySetupByUsersFinder returned");
 }
 
-// ═══════════════════════════════════════════════════════
-// JNI_OnLoad
-// ═══════════════════════════════════════════════════════
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     LOGI("JNI_OnLoad");
     g_vm = vm;
@@ -157,23 +126,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         return JNI_VERSION_1_6;
     }
 
-    // ShadowHook
     int r = shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
     LOGI("shadowhook_init -> %d", r);
 
-    // late init
-    BNM::Loading::AllowLateInitHook();
-    LOGI("AllowLateInitHook called");
-
-    // callback
     BNM::Loading::AddOnLoadedEvent(OnBNMLoaded);
 
-    // اولین تلاش (احتمالاً fail میشه چون il2cpp نیست)
-    bool ok = BNM::Loading::TryLoadByJNI(env);
-    LOGI("TryLoadByJNI -> %s", ok ? "OK" : "deferred");
-
-    // Poll thread — با custom finder
-    std::thread(PollAndLoad).detach();
+    std::thread(PollAndSetup).detach();
 
     return JNI_VERSION_1_6;
 }
