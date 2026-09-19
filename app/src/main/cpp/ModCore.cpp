@@ -32,6 +32,9 @@ static void L(const char* fmt, ...) {
     JB_Log(buf);
 }
 
+// ═══════════════════════════════════════════════════════
+// GLOBAL CLASS CACHE
+// ═══════════════════════════════════════════════════════
 static BNM::Class cls_GtaMenu;
 static BNM::Class cls_NetworkManager;
 static BNM::Class cls_NetworkClient;
@@ -39,17 +42,21 @@ static BNM::Class cls_CustomNetworkManager;
 static BNM::Class cls_Button;
 static BNM::Class cls_Uri;
 
-// ─── Flags set from JNI thread, consumed by Update hook (main thread) ───
+// ═══════════════════════════════════════════════════════
+// FLAGS (JNI thread → Update hook main thread)
+// ═══════════════════════════════════════════════════════
 static std::atomic<bool> g_requestConnect{false};
 static std::atomic<bool> g_requestDisable{false};
 static std::atomic<bool> g_hookInstalled{false};
 static std::atomic<bool> g_running{false};
 static std::thread       g_retryThread;
 
-// ─── State tracking (main thread only) ───
-static int  g_lastMenu = -1;
-static bool g_lastNetworkActive = false;
-static int  g_frameCounter = 0;
+// ═══════════════════════════════════════════════════════
+// STATE (main thread only)
+// ═══════════════════════════════════════════════════════
+static int   g_lastMenu = -1;
+static bool  g_lastNetworkActive = false;
+static int   g_frameCounter = 0;
 static void* orig_Update = nullptr;
 
 // ═══════════════════════════════════════════════════════
@@ -217,6 +224,8 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
         ((void(*)(void*,void*))orig_Update)(self, methodInfo);
     }
 
+    auto* selfObj = (BNM::IL2CPP::Il2CppObject*)self;
+
     // ─── Connect request from JNI ───
     if (g_requestConnect.exchange(false)) {
         L("[Update] connect requested");
@@ -233,12 +242,12 @@ static void Hook_GtaMenuUpdate(void* self, void* methodInfo) {
     g_frameCounter++;
     if (g_frameCounter >= 120) {
         g_frameCounter = 0;
-        int menu = ReadCurrentMenu(self);
+        int menu = ReadCurrentMenu(selfObj);
         if (menu == 0) DoDisableButtons();
     }
 
     // ─── State logging ───
-    int menu = ReadCurrentMenu(self);
+    int menu = ReadCurrentMenu(selfObj);
     bool network = ReadNetworkActive();
 
     if (menu != g_lastMenu) {
