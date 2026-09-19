@@ -4,13 +4,13 @@ plugins {
 
 android {
     namespace 'com.myapp.modmenu'
-    compileSdk 34
+    compileSdk 36
     ndkVersion "26.1.10909125"
 
     defaultConfig {
         applicationId "com.myapp.modmenu"
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0"
 
